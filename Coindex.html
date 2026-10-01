@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Good Samaritan Society – Colorado Market Map</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📍</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --mine: #FF1FCE; --snf: #1D5BD8; --assisted: #22E04B; --independent: #FF8C00;
+    --hospital: #C8102E; --other: #8B94A5;
+    --ink: #1C2333; --muted: #5C6679; --line: #E1E5EC; --soft: #F4F6F9;
+    --font: "Public Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font-family: var(--font); color: var(--ink); background: #E9ECF1; }
+  #map { position: absolute; inset: 0; }
+
+  .panel {
+    position: absolute; z-index: 1000;
+    top: calc(12px + env(safe-area-inset-top, 0px)); left: 12px;
+    width: 340px; max-height: calc(100% - 24px);
+    background: #fff; border-radius: 14px; box-shadow: 0 6px 24px rgba(20,30,50,.18);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
+  .panel-head h1 { font-size: 17px; line-height: 1.25; margin: 0; font-weight: 700; }
+  .panel-head p { margin: 3px 0 0; font-size: 13px; color: var(--muted); }
+  .collapse-btn { flex: none; border: 0; background: #F1F3F7; color: var(--ink); width: 34px; height: 34px; border-radius: 50%; font-size: 18px; cursor: pointer; display: none; }
+  .panel-body { padding: 8px 16px 14px; overflow-y: auto; }
+
+  .legend { list-style: none; margin: 0 0 10px; padding: 0; }
+  .legend li { border-bottom: 1px solid var(--line); }
+  .legend li:last-child { border-bottom: 0; }
+  .legend label { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 14px; cursor: pointer; }
+  .legend input { width: 17px; height: 17px; margin: 0; accent-color: var(--ink); }
+  .legend .name { flex: 1; }
+  .legend .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  .sw { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+  .sw.mine { width: 20px; height: 20px; background: var(--mine); border-width: 3px; }
+  .sw.snf { background: var(--snf); border-radius: 4px; }
+  .sw.otherSnf { background: var(--other); border-radius: 3px; width: 12px; height: 12px; }
+  .sw.assisted { background: var(--assisted); }
+  .sw.independent { background: var(--independent); }
+  .sw.hospital { background: var(--hospital); color: #fff; font: 700 13px/12px var(--font); text-align: center; }
+  .sw.rings { background: rgba(255,31,206,.08); border: 2px dashed var(--mine); box-shadow: none; }
+
+  .status { font-size: 13px; line-height: 1.45; color: var(--muted); background: var(--soft); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+  .status.error { background: #FDEEF0; color: #8A1024; }
+  .status button { margin-top: 6px; }
+  .spinner { display: inline-block; width: 11px; height: 11px; margin-right: 6px; vertical-align: -1px; border: 2px solid #C5CBD6; border-top-color: var(--ink); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 4px 0 8px; font-weight: 600; }
+  .market { display: grid; gap: 8px; margin-bottom: 12px; }
+  .mcard { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fff; text-align: left; font: inherit; color: inherit; cursor: pointer; width: 100%; }
+  .mcard:hover { border-color: var(--mine); }
+  .mcard strong { display: block; font-size: 14px; margin-bottom: 2px; }
+  .mcard .own { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .mstats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .mstat { background: var(--soft); border-radius: 6px; padding: 5px 4px; text-align: center; }
+  .mstat b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .mstat span { font-size: 10.5px; color: var(--muted); line-height: 1.2; display: block; }
+  .mstat i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 3px; vertical-align: 1px; }
+  .snfbeds { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn { font: 600 13px var(--font); color: var(--ink); background: #fff; border: 1px solid #C9CFD9; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+  .btn:hover { background: var(--soft); }
+  .btn:focus-visible, .legend input:focus-visible, .collapse-btn:focus-visible, .mcard:focus-visible { outline: 3px solid var(--mine); outline-offset: 2px; }
+  .note { font-size: 12px; color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
+
+  .m-hosp { width: 20px; height: 20px; border-radius: 50%; background: var(--hospital); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); color: #fff; font: 700 15px/16px var(--font); text-align: center; }
+  .m-snf { width: 16px; height: 16px; border-radius: 4px; background: var(--snf); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.45); }
+  .m-osnf { width: 10px; height: 10px; border-radius: 3px; background: var(--other); border: 1.5px solid #fff; box-shadow: 0 0 2px rgba(0,0,0,.4); }
+
+  .leaflet-popup-content { font-family: var(--font); font-size: 13px; line-height: 1.45; margin: 12px 14px; min-width: 220px; }
+  .pop-type { font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+  .pop-type i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .pop-name { font-size: 15px; font-weight: 700; margin: 0 0 4px; }
+  .pop-cap { font-size: 14px; font-weight: 600; margin: 2px 0 6px; font-variant-numeric: tabular-nums; }
+  .pop-row { color: var(--muted); }
+  .pop-row a { color: #0B57D0; }
+  .pop-dist { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+  .pop-table { border-collapse: collapse; width: 100%; margin: 6px 0; font-variant-numeric: tabular-nums; }
+  .pop-table th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line); padding: 3px 6px 3px 0; }
+  .pop-table td { padding: 3px 6px 3px 0; border-bottom: 1px solid var(--soft); vertical-align: top; }
+  .pop-table td.n { text-align: right; }
+  .stars { color: #B7791F; letter-spacing: 1px; }
+  .approx { color: #8A5A00; font-size: 12px; }
+
+  @media (max-width: 640px) {
+    .panel { top: auto; left: 8px; right: 8px; width: auto; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); max-height: 58%; }
+    .collapse-btn { display: block; }
+    .panel.collapsed .panel-body { display: none; }
+    .leaflet-bottom.leaflet-right { bottom: 70px; }
+  }
+</style>
+</head>
+<body>
+<div id="map" role="application" aria-label="Map of Good Samaritan Society campuses and nearby competitors"></div>
+
+<section class="panel" id="panel" aria-label="Legend and market summary">
+  <div class="panel-head">
+    <div>
+      <h1>Colorado market map</h1>
+      <p>Good Samaritan Society campuses and competitors within 20 miles</p>
+    </div>
+    <button class="collapse-btn" id="collapseBtn" aria-expanded="true" aria-controls="panelBody" aria-label="Hide panel">▾</button>
+  </div>
+  <div class="panel-body" id="panelBody">
+    <ul class="legend" id="legend"></ul>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+    <h2>Within 20 miles of each campus</h2>
+    <div class="market" id="market"></div>
+    <div class="actions">
+      <button class="btn" id="fitBtn">Zoom to campuses</button>
+      <button class="btn" id="exportBtn">Download for Excel</button>
+    </div>
+    <p class="note">Your campuses and units: your facility mapping. Skilled nursing: CMS Care Compare (processed Aug 2026). Hospitals, assisted living and independent living: OpenStreetMap, which may miss some smaller communities.</p>
+  </div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script>
+/* ============ SETTINGS ============ */
+const RADIUS_MILES = 20;
+const COLORS = {
+  mine: '#FF1FCE',        // Good Samaritan Society campuses (bright magenta)
+  snf: '#1D5BD8',         // competitor skilled nursing within 20 mi (blue)
+  otherSnf: '#8B94A5',    // other Colorado skilled nursing (gray)
+  assisted: '#22E04B',    // assisted living (bright green)
+  independent: '#FF8C00', // independent / senior living (orange)
+  hospital: '#C8102E'     // hospitals (crimson)
+};
+
+/* ============ DATA (from Colorado.xlsx) ============
+   CAMPUSES: your locations from the FacilityMapping tab. Campuses without
+   latitude/longitude are located from their address when the page loads.
+   To pin one exactly, type its lat/lon in below.
+   SNFS: every other Colorado skilled nursing facility from the SNF tab. */
+const DATA = {"camps": [{"facility": "Loveland", "name": "Good Samaritan Society \u2013 Loveland", "address": "2101 S Garfield Ave", "city": "Loveland", "zip": "80537", "lat": 40.3704, "lon": -105.08, "services": [{"careType": "SNF", "community": "Skilled Nursing", "units": null, "beds": 104, "ccn": 65139, "rating": 3}, {"careType": "AL", "community": "Assisted Living", "units": 60, "beds": null}, {"careType": "IL", "community": "Senior Living", "units": 102, "beds": null}, {"careType": "IL", "community": "Twin Home Duplexes", "units": 80, "beds": null}]}, {"facility": "Estes Park", "name": "Good Samaritan Society \u2013 Estes Park", "address": "1901 Ptarmigan Trail", "city": "Estes Park", "zip": "80517", "lat": null, "lon": null, "services": [{"careType": "AL", "community": "Assisted Living", "units": 30, "beds": null}, {"careType": "IL", "community": "Senior Living", "units": 34, "beds": null}, {"careType": "IL", "community": "Twin Home Duplexes", "units": 46, "beds": null}]}, {"facility": "Windsor", "name": "Good Samaritan Society \u2013 Windsor", "address": "805 Compassion Drive", "city": "Windsor", "zip": "80550", "lat": null, "lon": null, "services": [{"careType": "AL", "community": "Assisted Living", "units": 52, "beds": null}, {"careType": "IL", "community": "Senior Living", "units": 121, "beds": null}, {"careType": "IL", "community": "Twin Home Duplexes", "units": 12, "beds": null}, {"careType": "AL", "community": "Memory Care Assisted Living", "units": 16, "beds": null}]}, {"facility": "Fort Collins", "name": "Good Samaritan Society \u2013 Fort Collins", "address": "508 W Trilby Rd", "city": "Fort Collins", "zip": "80525", "lat": 40.4947, "lon": -105.09, "services": [{"careType": "AL", "community": "Assisted Living", "units": 28, "beds": null}, {"careType": "IL", "community": "Senior Living", "units": 34, "beds": null}, {"careType": "SNF", "community": "Post Acute Skilled", "units": null, "beds": 64, "ccn": 65227, "rating": 4}, {"careType": "IL", "community": "Twin Home Duplexes", "units": 2, "beds": null}]}, {"facility": "Greeley", "name": "Good Samaritan Society \u2013 Greeley (Fox Run)", "address": "1720 60Th Avenue", "city": "Greeley", "zip": "80634", "lat": null, "lon": null, "services": [{"careType": "IL", "community": "Senior Living", "units": 48, "beds": null}]}], "snfs": [{"ccn": "65001", "name": "LOWRY HILLS CARE AND REHABILITATION", "address": "10201 E 3RD AVE", "city": "AURORA", "zip": "80010", "phone": "3033643364", "beds": 108, "census": 99.6, "owner": "For profit - Individual", "chain": "SWEETWATER CARE", "rating": 2, "lat": 39.7201, "lon": -104.87}, {"ccn": "65009", "name": "CITY PARK HEALTHCARE AND REHABILITATION CENTER", "address": "1667 SAINT PAUL ST", "city": "DENVER", "zip": "80206", "phone": "3033992040", "beds": 125, "census": 124.2, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 3, "lat": 39.743, "lon": -104.95}, {"ccn": "65015", "name": "MOUNTAIN VISTA HEALTH CENTER", "address": "4800 TABOR ST", "city": "WHEAT RIDGE", "zip": "80033", "phone": "3034214161", "beds": 168, "census": 83.8, "owner": "Non profit - Corporation", "chain": "AMERICAN BAPTIST HOMES OF THE MIDWEST", "rating": 2, "lat": 39.7851, "lon": -105.13}, {"ccn": "65034", "name": "AMBERWOOD POST ACUTE", "address": "4686 E ASBURY CIR", "city": "DENVER", "zip": "80222", "phone": "3037561566", "beds": 88, "census": 82.8, "owner": "For profit - Corporation", "chain": "PACS GROUP", "rating": 2, "lat": 39.6799, "lon": -104.93}, {"ccn": "65052", "name": "BOULDER POST ACUTE", "address": "2121 MESA DR", "city": "BOULDER", "zip": "80304", "phone": "3034424037", "beds": 162, "census": 135.5, "owner": "For profit - Limited Liability company", "chain": "PACS GROUP", "rating": 4, "lat": 40.0249, "lon": -105.27}, {"ccn": "65077", "name": "ENGLEWOOD POST ACUTE AND REHABILITATION", "address": "3575 S WASHINGTON ST", "city": "ENGLEWOOD", "zip": "80113", "phone": "3037892265", "beds": 82, "census": 72.5, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 4, "lat": 39.6517, "lon": -104.98}, {"ccn": "65092", "name": "VILLA MANOR CARE CENTER", "address": "7950 W MISSISSIPPI AVE", "city": "LAKEWOOD", "zip": "80226", "phone": "3039864511", "beds": 110, "census": 78.9, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 4, "lat": 39.6966, "lon": -105.09}, {"ccn": "65097", "name": "MAPLETON POST ACUTE", "address": "115 INGALLS ST", "city": "LAKEWOOD", "zip": "80226", "phone": "3032371325", "beds": 90, "census": 76, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 4, "lat": 39.7187, "lon": -105.06}, {"ccn": "65100", "name": "ROCK CANYON RESPIRATORY AND REHABILITATION CENTER", "address": "2515 PITMAN PL", "city": "PUEBLO", "zip": "81004", "phone": "7195640550", "beds": 151, "census": 135.3, "owner": "For profit - Limited Liability company", "chain": "THE ENSIGN GROUP", "rating": 1, "lat": 38.2396, "lon": -104.64}, {"ccn": "65108", "name": "VILLAS AT SUNNY ACRES, THE", "address": "2501 E 104TH AVE", "city": "THORNTON", "zip": "80233", "phone": "3032554100", "beds": 160, "census": 143.2, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 2, "lat": 39.885, "lon": -104.96}, {"ccn": "65110", "name": "RED CLIFFS POST ACUTE", "address": "2901 N 12TH ST", "city": "GRAND JUNCTION", "zip": "81506", "phone": "9702437211", "beds": 89, "census": 85.7, "owner": "For profit - Corporation", "chain": "PACS GROUP", "rating": 2, "lat": 39.0937, "lon": -108.55}, {"ccn": "65113", "name": "MEDALLION POST ACUTE REHABILITATION", "address": "1719 E BIJOU ST", "city": "COLORADO SPRINGS", "zip": "80909", "phone": "7193814963", "beds": 60, "census": 57.6, "owner": "For profit - Limited Liability company", "chain": "THE ENSIGN GROUP", "rating": 1, "lat": 38.8358, "lon": -104.8}, {"ccn": "65119", "name": "VALLEY MANOR CARE CENTER", "address": "1401 S CASCADE AVE", "city": "MONTROSE", "zip": "81401", "phone": "9702499634", "beds": 101, "census": 66.1, "owner": "Non profit - Church related", "chain": "VOLUNTEERS OF AMERICA SENIOR LIVING", "rating": 3, "lat": 38.4687, "lon": -107.86}, {"ccn": "65120", "name": "CLEAR CREEK CARE CENTER", "address": "7481 KNOX PL", "city": "WESTMINSTER", "zip": "80030", "phone": "3034277101", "beds": 80, "census": 73, "owner": "For profit - Limited Liability company", "chain": "", "rating": 3, "lat": 39.8325, "lon": -105.03}, {"ccn": "65121", "name": "VISTA RIDGE CARE AND REHABILITATION", "address": "855 HUNTER DR", "city": "PUEBLO", "zip": "81001", "phone": "7192533700", "beds": 90, "census": 69.1, "owner": "For profit - Corporation", "chain": "FRONTLINE MANAGEMENT", "rating": 3, "lat": 38.2887, "lon": -104.6}, {"ccn": "65124", "name": "HOLLY HEIGHTS CARE AND REHABILITATION", "address": "6000 E ILIFF AVE", "city": "DENVER", "zip": "80222", "phone": "3037575441", "beds": 133, "census": 98.3, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 3, "lat": 39.6748, "lon": -104.92}, {"ccn": "65129", "name": "NORTH SHORE HEALTH & REHAB FACILITY", "address": "1365 W 29TH ST", "city": "LOVELAND", "zip": "80538", "phone": "9706676111", "beds": 120, "census": 104.4, "owner": "For profit - Limited Liability company", "chain": "", "rating": 4, "lat": 40.4217, "lon": -105.1}, {"ccn": "65142", "name": "LEMAY AVENUE HEALTH AND REHAB LLC", "address": "4824 S LEMAY AVE", "city": "FORT COLLINS", "zip": "80525", "phone": "8017094358", "beds": 130, "census": 125.4, "owner": "For profit - Corporation", "chain": "", "rating": 4, "lat": 40.52, "lon": -105.06}, {"ccn": "65144", "name": "GUNNISON VALLEY HEALTH SENIOR CARE CENTER", "address": "1500 W TOMICHI AVE", "city": "GUNNISON", "zip": "81230", "phone": "9706410704", "beds": 50, "census": 32.4, "owner": "Government - City/county", "chain": "", "rating": 5, "lat": 38.5444, "lon": -106.95}, {"ccn": "65146", "name": "HAMPDEN HILLS POST ACUTE", "address": "14699 E HAMPDEN AVE", "city": "AURORA", "zip": "80014", "phone": "3036930111", "beds": 218, "census": 202, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 2, "lat": 39.6531, "lon": -104.82}, {"ccn": "65147", "name": "MOUNTAIN VIEW POST ACUTE", "address": "835 TENDERFOOT HILL RD", "city": "COLORADO SPRINGS", "zip": "80906", "phone": "7195768380", "beds": 180, "census": 162, "owner": "For profit - Limited Liability company", "chain": "PACS GROUP", "rating": 2, "lat": 38.7939, "lon": -104.81}, {"ccn": "65150", "name": "DEVONSHIRE CARE CENTER", "address": "1330 SIDNEY AVE", "city": "STERLING", "zip": "80751", "phone": "9705224888", "beds": 84, "census": 66.8, "owner": "For profit - Limited Liability company", "chain": "LONG PEAK OPERATING COMPANY", "rating": 2, "lat": 40.6414, "lon": -103.2}, {"ccn": "65152", "name": "SUNDANCE SKILLED NURSING AND REHABILITATION", "address": "2612 W CUCHARRAS ST", "city": "COLORADO SPRINGS", "zip": "80904", "phone": "7196327474", "beds": 68, "census": 60, "owner": "For profit - Limited Liability company", "chain": "MADISON CREEK PARTNERS", "rating": 2, "lat": 38.8477, "lon": -104.87}, {"ccn": "65153", "name": "VISTA GRANDE REHABILITATION AND HEALTHCARE CENTER", "address": "680 E HOSPITAL DR", "city": "CORTEZ", "zip": "81321", "phone": "9705641122", "beds": 101, "census": 66.2, "owner": "For profit - Corporation", "chain": "CENTENNIAL HEALTHCARE", "rating": 2, "lat": 37.2851, "lon": -108.65}, {"ccn": "65163", "name": "EBEN EZER LUTHERAN CARE CENTER", "address": "122 HOSPITAL RD", "city": "BRUSH", "zip": "80723", "phone": "9708422861", "beds": 125, "census": 82.1, "owner": "Non profit - Corporation", "chain": "", "rating": 2, "lat": 40.2537, "lon": -103.64}, {"ccn": "65165", "name": "RIVERBEND HEALTH AND REHABILITATION CENTER", "address": "821 DUFFIELD CT", "city": "LOVELAND", "zip": "80537", "phone": "9706690345", "beds": 100, "census": 81.7, "owner": "For profit - Limited Liability company", "chain": "THE ENSIGN GROUP", "rating": 2, "lat": 40.4002, "lon": -105.09}, {"ccn": "65166", "name": "POUDRE CANYON REHABILITATION AND NURSING, LLC", "address": "1000 S LEMAY AVE", "city": "FORT COLLINS", "zip": "80524", "phone": "9704827925", "beds": 83, "census": 69.7, "owner": "For profit - Limited Liability company", "chain": "THE CHARLY BELLO FAMILY, THE MAZE FAMILY, THE SWAIN FAMILY, & WALTER MYERS", "rating": 1, "lat": 40.5742, "lon": -105.06}, {"ccn": "65168", "name": "FALCON HEIGHTS REHABILITATION AND NURSING LLC", "address": "1795 MONTEREY RD", "city": "COLORADO SPRINGS", "zip": "80910", "phone": "7194717850", "beds": 107, "census": 88.9, "owner": "For profit - Corporation", "chain": "THE CHARLY BELLO FAMILY, THE MAZE FAMILY, THE SWAIN FAMILY, & WALTER MYERS", "rating": 2, "lat": 38.8062, "lon": -104.78}, {"ccn": "65169", "name": "Pueblo Heights Nursing and Rehabilitation", "address": "1601 CONSTITUTION RD", "city": "PUEBLO", "zip": "81001", "phone": "7195627200", "beds": 120, "census": 90.3, "owner": "For profit - Individual", "chain": "MADISON CREEK PARTNERS", "rating": 2, "lat": 38.2882, "lon": -104.58}, {"ccn": "65170", "name": "SOUTH PLATTE REHABILITATION AND NURSING LLC", "address": "2200 EDISON ST", "city": "BRUSH", "zip": "80723", "phone": "9708422825", "beds": 78, "census": 45.6, "owner": "For profit - Limited Liability company", "chain": "THE CHARLY BELLO FAMILY, THE MAZE FAMILY, THE SWAIN FAMILY, & WALTER MYERS", "rating": 1, "lat": 40.2547, "lon": -103.65}, {"ccn": "65171", "name": "Edgewater Health and Rehabilitation", "address": "1655 EATON ST", "city": "LAKEWOOD", "zip": "80214", "phone": "3032385363", "beds": 67, "census": 67.3, "owner": "For profit - Limited Liability company", "chain": "", "rating": 5, "lat": 39.7432, "lon": -105.06}, {"ccn": "65172", "name": "FOUNTAIN VIEW REHABILITATION AND NURSING LLC", "address": "2438 E FOUNTAIN BLVD", "city": "COLORADO SPRINGS", "zip": "80910", "phone": "7194738000", "beds": 90, "census": 88.2, "owner": "For profit - Limited Liability company", "chain": "THE CHARLY BELLO FAMILY, THE MAZE FAMILY, THE SWAIN FAMILY, & WALTER MYERS", "rating": 3, "lat": 38.8174, "lon": -104.78}, {"ccn": "65174", "name": "STERLING REHABILITATION AND NURSING, LLC", "address": "1420 S 3RD AVE", "city": "STERLING", "zip": "80751", "phone": "9705222933", "beds": 63, "census": 52.4, "owner": "For profit - Limited Liability company", "chain": "THE CHARLY BELLO FAMILY, THE MAZE FAMILY, THE SWAIN FAMILY, & WALTER MYERS", "rating": 1, "lat": 40.6117, "lon": -103.21}, {"ccn": "65175", "name": "KIOWA HILLS REHABILITATION AND NURSING, LLC", "address": "924 W KIOWA ST", "city": "COLORADO SPRINGS", "zip": "80905", "phone": "7196365221", "beds": 83, "census": 78.1, "owner": "For profit - Limited Liability company", "chain": "THE CHARLY BELLO FAMILY, THE MAZE FAMILY, THE SWAIN FAMILY, & WALTER MYERS", "rating": 1, "lat": 38.8367, "lon": -104.84}, {"ccn": "65176", "name": "HIGHLAND PARK REHABILITATION & CARE CENTER", "address": "500 GENEVA ST", "city": "AURORA", "zip": "80010", "phone": "3033649311", "beds": 110, "census": 107.7, "owner": "For profit - Limited Liability company", "chain": "SWEETWATER CARE", "rating": 5, "lat": 39.7233, "lon": -104.87}, {"ccn": "65179", "name": "HILDEBRAND CARE CENTER", "address": "1401 PHAY AVE", "city": "CANON CITY", "zip": "81212", "phone": "7192758656", "beds": 75, "census": 70, "owner": "For profit - Corporation", "chain": "", "rating": 5, "lat": 38.4557, "lon": -105.23}, {"ccn": "65181", "name": "VALLEY VIEW VILLA", "address": "815 FREMONT AVE", "city": "FORT MORGAN", "zip": "80701", "phone": "9708678261", "beds": 120, "census": 38.5, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 5, "lat": 40.2603, "lon": -103.79}, {"ccn": "65183", "name": "PROGRESSIVE CARE CENTER", "address": "1338 PHAY AVE", "city": "CANON CITY", "zip": "81212", "phone": "7192451406", "beds": 68, "census": 65.3, "owner": "For profit - Corporation", "chain": "FRONTLINE MANAGEMENT", "rating": 2, "lat": 38.4557, "lon": -105.23}, {"ccn": "65188", "name": "THE LODGE AT RED ROCKS", "address": "150 SPRING ST", "city": "MORRISON", "zip": "80465", "phone": "7209834600", "beds": 180, "census": 138.5, "owner": "For profit - Limited Liability company", "chain": "", "rating": 1, "lat": 39.6529, "lon": -105.19}, {"ccn": "65189", "name": "PEAKS CARE CENTER, THE", "address": "1440 COFFMAN ST", "city": "LONGMONT", "zip": "80501", "phone": "3037762814", "beds": 84, "census": 83.9, "owner": "For profit - Limited Liability company", "chain": "FRONTLINE MANAGEMENT", "rating": 3, "lat": 40.1838, "lon": -105.1}, {"ccn": "65191", "name": "Heights Care & Rehabilitation LLC", "address": "3131 S FEDERAL BLVD", "city": "DENVER", "zip": "80236", "phone": "3037610260", "beds": 110, "census": 89.7, "owner": "For profit - Limited Liability company", "chain": "PACS GROUP", "rating": 2, "lat": 39.6582, "lon": -105.03}, {"ccn": "65192", "name": "REHABILITATION AND NURSING CENTER OF THE ROCKIES", "address": "1020 PATTON ST", "city": "FORT COLLINS", "zip": "80524", "phone": "9704847981", "beds": 106, "census": 87.7, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 3, "lat": 40.5736, "lon": -105.05}, {"ccn": "65193", "name": "THORNTON CARE CENTER", "address": "501 THORNTON PKWY", "city": "THORNTON", "zip": "80229", "phone": "3034526101", "beds": 101, "census": 81.3, "owner": "For profit - Limited Liability company", "chain": "LONG PEAK OPERATING COMPANY", "rating": 1, "lat": 39.8705, "lon": -104.98}, {"ccn": "65195", "name": "HOPE SPRINGS CARE CENTER", "address": "1043 RIDGE ST", "city": "MONTROSE", "zip": "81401", "phone": "9702499683", "beds": 74, "census": 49, "owner": "For profit - Corporation", "chain": "RECOVER-CARE HEALTHCARE", "rating": 2, "lat": 38.4775, "lon": -107.86}, {"ccn": "65196", "name": "MALLEY TRANSITIONAL CARE CENTER", "address": "401 MALLEY DR", "city": "NORTHGLENN", "zip": "80233", "phone": "3034524700", "beds": 162, "census": 136.6, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 2, "lat": 39.9031, "lon": -104.98}, {"ccn": "65198", "name": "GARDENS, THE", "address": "104 LOIS LN", "city": "COLORADO SPRINGS", "zip": "80904", "phone": "7196352569", "beds": 45, "census": 42.9, "owner": "For profit - Limited Liability company", "chain": "MADISON CREEK PARTNERS", "rating": 5, "lat": 38.8589, "lon": -104.88}, {"ccn": "65202", "name": "CEDARS HEALTHCARE CENTER", "address": "1599 INGALLS ST", "city": "LAKEWOOD", "zip": "80214", "phone": "3032323551", "beds": 130, "census": 108, "owner": "For profit - Limited Liability company", "chain": "STELLAR SENIOR LIVING", "rating": 3, "lat": 39.7422, "lon": -105.06}, {"ccn": "65203", "name": "CHERRELYN HEALTHCARE CENTER", "address": "5555 S ELATI  ST", "city": "LITTLETON", "zip": "80120", "phone": "3037988686", "beds": 190, "census": 179.3, "owner": "For profit - Corporation", "chain": "STELLAR SENIOR LIVING", "rating": 4, "lat": 39.6158, "lon": -104.99}, {"ccn": "65206", "name": "ROWAN COMMUNITY, INC", "address": "4601 E ASBURY CIR", "city": "DENVER", "zip": "80222", "phone": "3037571228", "beds": 65, "census": 58, "owner": "For profit - Corporation", "chain": "VIVAGE SENIOR LIVING", "rating": 4, "lat": 39.6803, "lon": -104.93}, {"ccn": "65208", "name": "WELLSPRINGS CARE CENTER", "address": "3636 S PEARL ST", "city": "ENGLEWOOD", "zip": "80113", "phone": "3037611640", "beds": 81, "census": 70.6, "owner": "For profit - Corporation", "chain": "", "rating": 3, "lat": 39.65, "lon": -104.98}, {"ccn": "65209", "name": "WESTERN HILLS HEALTH CARE CENTER", "address": "1625 CARR ST", "city": "LAKEWOOD", "zip": "80214", "phone": "3032326881", "beds": 140, "census": 90.1, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 3, "lat": 39.7421, "lon": -105.09}, {"ccn": "65211", "name": "FAIRACRES MANOR, INC.", "address": "1700 18TH AVE", "city": "GREELEY", "zip": "80631", "phone": "9703533370", "beds": 116, "census": 106.4, "owner": "For profit - Limited Liability company", "chain": "FRONTLINE MANAGEMENT", "rating": 4, "lat": 40.4128, "lon": -104.71}, {"ccn": "65212", "name": "WESTLAKE HEALTH AND REHABILITATION CENTER", "address": "1637 29TH AVE PL", "city": "GREELEY", "zip": "80634", "phone": "9703568181", "beds": 107, "census": 90, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 4, "lat": 40.4116, "lon": -104.73}, {"ccn": "65213", "name": "HEALTH CENTER AT FRANKLIN PARK", "address": "1535 PARK AVE", "city": "DENVER", "zip": "80218", "phone": "3034793692", "beds": 86, "census": 60.3, "owner": "Non profit - Corporation", "chain": "AMERICAN BAPTIST HOMES OF THE MIDWEST", "rating": 4, "lat": 39.7406, "lon": -104.97}, {"ccn": "65217", "name": "CANON LODGE CARE CENTER", "address": "905 HARDING AVE", "city": "CANON CITY", "zip": "81212", "phone": "7192754106", "beds": 60, "census": 35, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 2, "lat": 38.46, "lon": -105.24}, {"ccn": "65219", "name": "BROADVIEW HEALTH AND REHABILITATION CENTER", "address": "850 27TH AVE", "city": "GREELEY", "zip": "80634", "phone": "9703531018", "beds": 100, "census": 91.3, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 4, "lat": 40.4245, "lon": -104.72}, {"ccn": "65220", "name": "COLUMBINE MANOR CARE CENTER", "address": "530 W 16TH ST", "city": "SALIDA", "zip": "81201", "phone": "7195396112", "beds": 112, "census": 50.5, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 5, "lat": 38.5266, "lon": -106.01}, {"ccn": "65221", "name": "CREEKSIDE VILLAGE REHABILITATION AND NURSING LLC", "address": "1000 E STUART ST", "city": "FORT COLLINS", "zip": "80525", "phone": "9704825712", "beds": 120, "census": 74.4, "owner": "For profit - Limited Liability company", "chain": "THE CHARLY BELLO FAMILY, THE MAZE FAMILY, THE SWAIN FAMILY, & WALTER MYERS", "rating": 1, "lat": 40.5634, "lon": -105.06}, {"ccn": "65222", "name": "BOULDER CANYON HEALTH AND REHABILITATION", "address": "4685 BASELINE RD", "city": "BOULDER", "zip": "80303", "phone": "3034940535", "beds": 140, "census": 121.1, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 4, "lat": 40.0002, "lon": -105.24}, {"ccn": "65223", "name": "BERKLEY MANOR CARE CENTER", "address": "735 S LOCUST ST", "city": "DENVER", "zip": "80224", "phone": "3033204377", "beds": 118, "census": 72.8, "owner": "For profit - Limited Liability company", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 5, "lat": 39.703, "lon": -104.91}, {"ccn": "65225", "name": "COLONIAL REHABILITATION AND NURSING, LLC", "address": "1340 E FILLMORE ST", "city": "COLORADO SPRINGS", "zip": "80907", "phone": "7194731105", "beds": 80, "census": 75.9, "owner": "For profit - Limited Liability company", "chain": "THE CHARLY BELLO FAMILY, THE MAZE FAMILY, THE SWAIN FAMILY, & WALTER MYERS", "rating": 1, "lat": 38.8737, "lon": -104.8}, {"ccn": "65226", "name": "MCINTOSH CARE AND REHABILITATION CENTER", "address": "1800 STROH PL", "city": "LONGMONT", "zip": "80501", "phone": "3037766081", "beds": 110, "census": 83.3, "owner": "For profit - Limited Liability company", "chain": "THE ENSIGN GROUP", "rating": 3, "lat": 40.1822, "lon": -105.12}, {"ccn": "65228", "name": "CANYON VIEW CARE CENTER", "address": "151 E 3RD ST", "city": "PALISADE", "zip": "81526", "phone": "9704647500", "beds": 88, "census": 74.4, "owner": "For profit - Corporation", "chain": "", "rating": 2, "lat": 39.1103, "lon": -108.35}, {"ccn": "65229", "name": "LAKESHORE POST ACUTE AND REHABILITATION CENTER", "address": "2701 CALIFORNIA ST", "city": "PUEBLO", "zip": "81004", "phone": "7195611300", "beds": 106, "census": 81.1, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 4, "lat": 38.2233, "lon": -104.63}, {"ccn": "65230", "name": "SOUTH VALLEY POST ACUTE REHABILITATION", "address": "4450 E JEWELL AVE", "city": "DENVER", "zip": "80222", "phone": "3037577438", "beds": 106, "census": 102.8, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 4, "lat": 39.6821, "lon": -104.94}, {"ccn": "65231", "name": "University Park Care Center", "address": "945 DESERT FLOWER BLVD", "city": "PUEBLO", "zip": "81001", "phone": "7195455321", "beds": 180, "census": 109.7, "owner": "For profit - Limited Liability company", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 4, "lat": 38.3086, "lon": -104.59}, {"ccn": "65232", "name": "ATLAS POST ACUTE", "address": "2611 JONES AVE", "city": "PUEBLO", "zip": "81004", "phone": "7195641735", "beds": 146, "census": 73.4, "owner": "For profit - Corporation", "chain": "PACS GROUP", "rating": 3, "lat": 38.2368, "lon": -104.64}, {"ccn": "65233", "name": "HALLMARK NURSING CENTER", "address": "3701 W RADCLIFF AVE", "city": "DENVER", "zip": "80236", "phone": "3037946484", "beds": 143, "census": 96.5, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 5, "lat": 39.6365, "lon": -105.04}, {"ccn": "65234", "name": "EVERGREEN NURSING HOME", "address": "1991 CARROLL ST", "city": "ALAMOSA", "zip": "81101", "phone": "7195894951", "beds": 60, "census": 46.3, "owner": "For profit - Limited Liability company", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 2, "lat": 37.4826, "lon": -105.88}, {"ccn": "65235", "name": "PIONEER HEALTH CARE CENTER", "address": "900 S 12TH ST", "city": "ROCKY FORD", "zip": "81067", "phone": "7192543314", "beds": 101, "census": 77.5, "owner": "For profit - Limited Liability company", "chain": "MADISON CREEK PARTNERS", "rating": 4, "lat": 38.0455, "lon": -103.72}, {"ccn": "65237", "name": "HERITAGE PARK CARE CENTER", "address": "1200 VILLAGE RD", "city": "CARBONDALE", "zip": "81623", "phone": "9709631500", "beds": 90, "census": 40.2, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 3, "lat": 39.41, "lon": -107.22}, {"ccn": "65238", "name": "SKYLAKE POST ACUTE", "address": "12080 BELLAIRE WY", "city": "THORNTON", "zip": "80241", "phone": "3034502700", "beds": 242, "census": 190.9, "owner": "For profit - Limited Liability company", "chain": "PACS GROUP", "rating": 1, "lat": 39.9163, "lon": -104.94}, {"ccn": "65239", "name": "SAN LUIS CARE CENTER", "address": "240 CRAFT DR", "city": "ALAMOSA", "zip": "81101", "phone": "7195899081", "beds": 70, "census": 52.6, "owner": "For profit - Limited Liability company", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 4, "lat": 37.4781, "lon": -105.89}, {"ccn": "65240", "name": "BRIGHTON CARE CENTER", "address": "2025 E EGBERT ST", "city": "BRIGHTON", "zip": "80601", "phone": "3036594580", "beds": 108, "census": 88.7, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 4, "lat": 39.9836, "lon": -104.8}, {"ccn": "65241", "name": "HILLTOP PARK POST ACUTE", "address": "290 S MONACO PKWY", "city": "DENVER", "zip": "80224", "phone": "3033552525", "beds": 162, "census": 148.5, "owner": "For profit - Limited Liability company", "chain": "PACS GROUP", "rating": 2, "lat": 39.7117, "lon": -104.91}, {"ccn": "65242", "name": "BROOKSHIRE POST ACUTE", "address": "4660 E ASBURY CIR", "city": "DENVER", "zip": "80222", "phone": "3037561546", "beds": 67, "census": 57.7, "owner": "For profit - Individual", "chain": "PACS GROUP", "rating": 1, "lat": 39.6796, "lon": -104.93}, {"ccn": "65243", "name": "DURANGO HEALTH AND REHABILITATION", "address": "2911 JUNCTION ST", "city": "DURANGO", "zip": "81301", "phone": "9702472215", "beds": 133, "census": 86, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 1, "lat": 37.2985, "lon": -107.88}, {"ccn": "65244", "name": "GLENWOOD SPRINGS HEALTHCARE", "address": "2305 BLAKE AVE", "city": "GLENWOOD SPRINGS", "zip": "81601", "phone": "9709455476", "beds": 54, "census": 38.5, "owner": "For profit - Limited Liability company", "chain": "MADISON CREEK PARTNERS", "rating": 2, "lat": 39.5294, "lon": -107.32}, {"ccn": "65245", "name": "COLUMBINE WEST HEALTH AND REHAB LLC", "address": "940 WORTHINGTON CIR", "city": "FORT COLLINS", "zip": "80526", "phone": "9702212273", "beds": 100, "census": null, "owner": "For profit - Limited Liability company", "chain": "", "rating": 3, "lat": 40.557, "lon": -105.09}, {"ccn": "65247", "name": "SPRINGS VILLAGE CARE CENTER", "address": "110 W VAN BUREN ST", "city": "COLORADO SPRINGS", "zip": "80907", "phone": "7194758686", "beds": 91, "census": 82.8, "owner": "For profit - Limited Liability company", "chain": "STELLAR SENIOR LIVING", "rating": 2, "lat": 38.8678, "lon": -104.83}, {"ccn": "65248", "name": "OAKWOOD CARE AND REHABILITATION", "address": "5301 W 1ST AVE", "city": "LAKEWOOD", "zip": "80226", "phone": "3032388333", "beds": 170, "census": 126.2, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 1, "lat": 39.7186, "lon": -105.05}, {"ccn": "65249", "name": "WILLOW TREE CARE CENTER", "address": "2050 S MAIN ST", "city": "DELTA", "zip": "81416", "phone": "9708749773", "beds": 80, "census": 54, "owner": "For profit - Limited Liability company", "chain": "STELLAR SENIOR LIVING", "rating": 2, "lat": 38.72, "lon": -108.06}, {"ccn": "65250", "name": "SKYLINE RIDGE NURSING & REHABILITATION CENTER", "address": "515 FAIRVIEW ST", "city": "CANON CITY", "zip": "81212", "phone": "7192750665", "beds": 85, "census": 68.2, "owner": "For profit - Corporation", "chain": "STELLAR SENIOR LIVING", "rating": 2, "lat": 38.4538, "lon": -105.24}, {"ccn": "65251", "name": "PAONIA CARE AND REHABILITATION CENTER", "address": "1625 MEADOWBROOK BLVD", "city": "PAONIA", "zip": "81428", "phone": "9705274837", "beds": 60, "census": 51.5, "owner": "For profit - Limited Liability company", "chain": "MADISON CREEK PARTNERS", "rating": 1, "lat": 38.8646, "lon": -107.58}, {"ccn": "65253", "name": "LA VILLA GRANDE CARE CENTER", "address": "2501 LITTLE BOOKCLIFF DR", "city": "GRAND JUNCTION", "zip": "81501", "phone": "9702451211", "beds": 96, "census": 82.2, "owner": "For profit - Corporation", "chain": "STELLAR SENIOR LIVING", "rating": 2, "lat": 39.09, "lon": -108.56}, {"ccn": "65254", "name": "SUNNY VISTA LIVING CENTER", "address": "2445 E CACHE LA POUDRE ST", "city": "COLORADO SPRINGS", "zip": "80909", "phone": "7194718700", "beds": 116, "census": 110.2, "owner": "Non profit - Corporation", "chain": "", "rating": 3, "lat": 38.8449, "lon": -104.78}, {"ccn": "65255", "name": "BRIARWOOD HEALTH CARE CENTER", "address": "1440 VINE ST", "city": "DENVER", "zip": "80206", "phone": "3033990350", "beds": 201, "census": 88.4, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 5, "lat": 39.7392, "lon": -104.96}, {"ccn": "65256", "name": "HIGHLINE POST ACUTE", "address": "6060 E ILIFF AVE", "city": "DENVER", "zip": "80222", "phone": "3037594221", "beds": 125, "census": 120.4, "owner": "For profit - Limited Liability company", "chain": "PACS GROUP", "rating": 1, "lat": 39.6748, "lon": -104.92}, {"ccn": "65257", "name": "STORYBROOK CARE & REHABILITATION", "address": "1005 E ELIZABETH ST", "city": "FORT COLLINS", "zip": "80524", "phone": "9704822525", "beds": 60, "census": 56.5, "owner": "For profit - Limited Liability company", "chain": "SWEETWATER CARE", "rating": 1, "lat": 40.5742, "lon": -105.06}, {"ccn": "65258", "name": "HORIZONS CARE CENTER", "address": "11411 HIGHWAY 65", "city": "ECKERT", "zip": "81418", "phone": "9708352600", "beds": 45, "census": 31.1, "owner": "Non profit - Corporation", "chain": "VOLUNTEERS OF AMERICA SENIOR LIVING", "rating": 3, "lat": 38.8207, "lon": -107.98}, {"ccn": "65259", "name": "ORCHARD PARK HEALTH CARE CENTER", "address": "6005 S HOLLY ST", "city": "LITTLETON", "zip": "80121", "phone": "3037731000", "beds": 133, "census": 121.2, "owner": "For profit - Partnership", "chain": "CLEAR CHOICE HEALTHCARE", "rating": 4, "lat": 39.6077, "lon": -104.92}, {"ccn": "65264", "name": "WALBRIDGE MEMORIAL CONVALESCENT WING", "address": "100 PIONEERS MEDICAL CENTER DR", "city": "MEEKER", "zip": "81641", "phone": "9708785047", "beds": 30, "census": 28.2, "owner": "Government - Hospital district", "chain": "", "rating": 3, "lat": 40.0455, "lon": -107.95}, {"ccn": "65265", "name": "BERTHOUD CARE AND REHABILITATION", "address": "855 FRANKLIN AVE", "city": "BERTHOUD", "zip": "80513", "phone": "9705322683", "beds": 76, "census": 67.3, "owner": "For profit - Limited Liability company", "chain": "THE ENSIGN GROUP", "rating": 4, "lat": 40.3092, "lon": -105.09}, {"ccn": "65266", "name": "GARDEN TERRACE ALZHEIMER'S CENTER OF EXCELLENCE", "address": "1600 S POTOMAC ST", "city": "AURORA", "zip": "80012", "phone": "3037508418", "beds": 120, "census": 96.6, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 4, "lat": 39.6883, "lon": -104.83}, {"ccn": "65267", "name": "WINDING TRAILS POST ACUTE", "address": "2800 PALO PKWY", "city": "BOULDER", "zip": "80301", "phone": "3034409100", "beds": 150, "census": 87, "owner": "For profit - Limited Liability company", "chain": "PACS GROUP", "rating": 2, "lat": 40.0436, "lon": -105.26}, {"ccn": "65269", "name": "LIFE CARE CENTER OF PUEBLO", "address": "2118 CHATALET LN", "city": "PUEBLO", "zip": "81005", "phone": "7195642000", "beds": 187, "census": 106.3, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 4, "lat": 38.2275, "lon": -104.67}, {"ccn": "65272", "name": "SIERRA POST ACUTE", "address": "1432 DEPEW ST", "city": "LAKEWOOD", "zip": "80214", "phone": "3032381375", "beds": 102, "census": 82.7, "owner": "For profit - Limited Liability company", "chain": "PACS GROUP", "rating": 2, "lat": 39.7392, "lon": -105.06}, {"ccn": "65273", "name": "LAKESIDE POST ACUTE", "address": "6270 W 38TH AVE", "city": "WHEAT RIDGE", "zip": "80033", "phone": "3034212272", "beds": 78, "census": 62.1, "owner": "For profit - Corporation", "chain": "PACS GROUP", "rating": 3, "lat": 39.7694, "lon": -105.07}, {"ccn": "65274", "name": "WESTWOOD POST ACUTE", "address": "3185 W ARKANSAS AVE", "city": "DENVER", "zip": "80219", "phone": "3039221169", "beds": 85, "census": 69, "owner": "For profit - Corporation", "chain": "PACS GROUP", "rating": 2, "lat": 39.6913, "lon": -105.03}, {"ccn": "65276", "name": "LIFE CARE CENTER OF EVERGREEN", "address": "2987 BERGEN PEAK DR", "city": "EVERGREEN", "zip": "80439", "phone": "3036744500", "beds": 120, "census": 57.2, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 4, "lat": 39.6607, "lon": -105.35}, {"ccn": "65278", "name": "PELICAN POINTE HEALTH AND REHABILITATION CENTER", "address": "710 3RD ST", "city": "WINDSOR", "zip": "80550", "phone": "9706867474", "beds": 104, "census": 85.5, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 1, "lat": 40.4728, "lon": -104.9}, {"ccn": "65282", "name": "LIFE CARE CENTER OF LONGMONT", "address": "2451 PRATT ST", "city": "LONGMONT", "zip": "80501", "phone": "3037765000", "beds": 187, "census": 120.7, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 3, "lat": 40.202, "lon": -105.11}, {"ccn": "65283", "name": "RIDGEVIEW POST ACUTE", "address": "5230 E 66TH WAY", "city": "COMMERCE CITY", "zip": "80022", "phone": "3032891848", "beds": 112, "census": 96.7, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 4, "lat": 39.8157, "lon": -104.93}, {"ccn": "65284", "name": "GRACE MANOR CARE CENTER", "address": "465 5TH ST", "city": "BURLINGTON", "zip": "80807", "phone": "7193467512", "beds": 31, "census": 27.6, "owner": "For profit - Limited Liability company", "chain": "FRONTLINE MANAGEMENT", "rating": 5, "lat": 39.3057, "lon": -102.26}, {"ccn": "65285", "name": "SILVER HEIGHTS SKILLED NURSING AND REHABILITATION", "address": "4001 HOME ST", "city": "CASTLE ROCK", "zip": "80108", "phone": "3036883174", "beds": 91, "census": 58.1, "owner": "For profit - Limited Liability company", "chain": "MADISON CREEK PARTNERS", "rating": 4, "lat": 39.4208, "lon": -104.87}, {"ccn": "65286", "name": "EAGLE RIDGE POST ACUTE", "address": "2425 TELLER AVE", "city": "GRAND JUNCTION", "zip": "81501", "phone": "9702433381", "beds": 70, "census": 66.6, "owner": "For profit - Corporation", "chain": "PACS GROUP", "rating": 2, "lat": 39.0751, "lon": -108.54}, {"ccn": "65290", "name": "CRESTMOOR CARE CENTER", "address": "895 S MONACO PKWY", "city": "DENVER", "zip": "80224", "phone": "3033213110", "beds": 108, "census": 86.9, "owner": "For profit - Limited Liability company", "chain": "LONG PEAK OPERATING COMPANY", "rating": 3, "lat": 39.7003, "lon": -104.91}, {"ccn": "65291", "name": "ROCK CREEK REHABILITATION AND HEALTHCARE CENTER", "address": "2277 EAST DR", "city": "MONTE VISTA", "zip": "81144", "phone": "7198525138", "beds": 60, "census": 34, "owner": "For profit - Limited Liability company", "chain": "CENTENNIAL HEALTHCARE", "rating": 1, "lat": 37.5781, "lon": -106.12}, {"ccn": "65292", "name": "REHABILITATION CENTER AT SANDALWOOD, THE", "address": "3835 HARLAN ST", "city": "WHEAT RIDGE", "zip": "80033", "phone": "3034221533", "beds": 103, "census": 82.7, "owner": "For profit - Limited Liability company", "chain": "", "rating": 4, "lat": 39.7702, "lon": -105.06}, {"ccn": "65294", "name": "LAMAR ESTATES NURSING CENTER", "address": "205 S 10TH ST", "city": "LAMAR", "zip": "81052", "phone": "7193363434", "beds": 60, "census": 24.6, "owner": "For profit - Limited Liability company", "chain": "", "rating": 1, "lat": 38.0878, "lon": -102.63}, {"ccn": "65296", "name": "CAMBRIDGE CARE CENTER", "address": "1685 EATON ST", "city": "LAKEWOOD", "zip": "80214", "phone": "3032324405", "beds": 110, "census": 92.8, "owner": "For profit - Limited Liability company", "chain": "", "rating": 3, "lat": 39.7437, "lon": -105.06}, {"ccn": "65297", "name": "ALLISON CARE CENTER", "address": "1660 ALLISON ST", "city": "LAKEWOOD", "zip": "80214", "phone": "3032327177", "beds": 85, "census": 77.7, "owner": "For profit - Limited Liability company", "chain": "LONG PEAK OPERATING COMPANY", "rating": 2, "lat": 39.7428, "lon": -105.09}, {"ccn": "65298", "name": "HARMONY POINTE CARE  CENTER", "address": "1655 YARROW ST", "city": "LAKEWOOD", "zip": "80214", "phone": "3032383838", "beds": 125, "census": 111.9, "owner": "For profit - Corporation", "chain": "LONG PEAK OPERATING COMPANY", "rating": 3, "lat": 39.7426, "lon": -105.08}, {"ccn": "65299", "name": "PARKVIEW CARE CENTER", "address": "3105 W ARKANSAS AVE", "city": "DENVER", "zip": "80219", "phone": "3039363497", "beds": 73, "census": 64.5, "owner": "For profit - Limited Liability company", "chain": "LONG PEAK OPERATING COMPANY", "rating": 5, "lat": 39.6913, "lon": -105.03}, {"ccn": "65302", "name": "REGENT PARK CARE CENTER", "address": "816 S INTEROCEAN AVE", "city": "HOLYOKE", "zip": "80734", "phone": "9708542251", "beds": 51, "census": 42.7, "owner": "For profit - Limited Liability company", "chain": "VIVAGE SENIOR LIVING", "rating": 4, "lat": 40.5783, "lon": -102.3}, {"ccn": "65303", "name": "BETH ISRAEL AT SHALOM PARK", "address": "14800 E BELLEVIEW DR", "city": "AURORA", "zip": "80015", "phone": "3036805000", "beds": 135, "census": 140.2, "owner": "Non profit - Church related", "chain": "", "rating": 5, "lat": 39.6234, "lon": -104.82}, {"ccn": "65305", "name": "LIBERTY HEIGHTS", "address": "12205 GUNSTOCK DR", "city": "COLORADO SPRINGS", "zip": "80921", "phone": "7194819494", "beds": 42, "census": 36.6, "owner": "For profit - Limited Liability company", "chain": "SENIOR LIFESTYLE", "rating": 4, "lat": 39.0075, "lon": -104.79}, {"ccn": "65306", "name": "VALLEY REHABILITATION AND HEALTHCARE CENTER, THE", "address": "211 E 3RD AVE", "city": "MANCOS", "zip": "81328", "phone": "9705339031", "beds": 110, "census": 54.5, "owner": "For profit - Corporation", "chain": "CENTENNIAL HEALTHCARE", "rating": 3, "lat": 37.3508, "lon": -108.29}, {"ccn": "65307", "name": "MANTEY HEIGHTS REHABILITATION & CARE CENTER", "address": "2825 PATTERSON RD", "city": "GRAND JUNCTION", "zip": "81506", "phone": "9702427356", "beds": 88, "census": 68.7, "owner": "For profit - Limited Liability company", "chain": "STELLAR SENIOR LIVING", "rating": 1, "lat": 39.0918, "lon": -108.53}, {"ccn": "65308", "name": "WHEATRIDGE CARE CENTER", "address": "2920 FENTON ST", "city": "WHEAT RIDGE", "zip": "80214", "phone": "3032380481", "beds": 65, "census": 54, "owner": "For profit - Limited Liability company", "chain": "VIVAGE SENIOR LIVING", "rating": 3, "lat": 39.7592, "lon": -105.06}, {"ccn": "65309", "name": "WASHINGTON COUNTY NURSING HOME", "address": "599 W GREENHOUSE DR", "city": "AKRON", "zip": "80720", "phone": "9703452211", "beds": 40, "census": 38.5, "owner": "Government - County", "chain": "", "rating": 5, "lat": 39.7105, "lon": -103.33}, {"ccn": "65311", "name": "UPTOWN CARE CENTER", "address": "745 E 18TH AVE", "city": "DENVER", "zip": "80203", "phone": "3038600500", "beds": 79, "census": 78.9, "owner": "For profit - Corporation", "chain": "", "rating": 4, "lat": 39.7448, "lon": -104.98}, {"ccn": "65312", "name": "CROWLEY COUNTY NURSING CENTER", "address": "401 IDAHO AVE", "city": "ORDWAY", "zip": "81063", "phone": "7192673561", "beds": 44, "census": 37.4, "owner": "Non profit - Corporation", "chain": "", "rating": 4, "lat": 38.219, "lon": -103.75}, {"ccn": "65316", "name": "HILLCREST CARE CENTER", "address": "360 CANYON RIDGE DR", "city": "WRAY", "zip": "80758", "phone": "9703324856", "beds": 45, "census": 41.1, "owner": "Government - Hospital district", "chain": "", "rating": 5, "lat": 40.0556, "lon": -102.22}, {"ccn": "65318", "name": "IRONDALE POST ACUTE", "address": "7150 POPLAR ST", "city": "COMMERCE CITY", "zip": "80022", "phone": "3032897110", "beds": 95, "census": 79.2, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 2, "lat": 39.8262, "lon": -104.91}, {"ccn": "65320", "name": "LITTLETON CARE AND REHABILITATION CENTER", "address": "5822 S LOWELL WAY", "city": "LITTLETON", "zip": "80123", "phone": "3037982497", "beds": 35, "census": 32.9, "owner": "For profit - Limited Liability company", "chain": "THE ENSIGN GROUP", "rating": 5, "lat": 39.6112, "lon": -105.03}, {"ccn": "65321", "name": "ARVADA CARE AND REHABILITATION CENTER", "address": "6121 W 60TH AVE", "city": "ARVADA", "zip": "80003", "phone": "3034204550", "beds": 54, "census": 46.4, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 5, "lat": 39.8055, "lon": -105.07}, {"ccn": "65322", "name": "JULIA TEMPLE HEALTHCARE CENTER", "address": "3401 S LAFAYETTE ST", "city": "ENGLEWOOD", "zip": "80113", "phone": "3037610075", "beds": 128, "census": 106.3, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 3, "lat": 39.655, "lon": -104.97}, {"ccn": "65323", "name": "DENVER NORTH CARE CENTER", "address": "2201 N DOWNING ST", "city": "DENVER", "zip": "80205", "phone": "3038614825", "beds": 82, "census": 77.5, "owner": "For profit - Limited Liability company", "chain": "", "rating": 3, "lat": 39.7495, "lon": -104.97}, {"ccn": "65324", "name": "FRASIER MEADOWS HEALTH CARE CENTER", "address": "4950 THUNDERBIRD DR", "city": "BOULDER", "zip": "80303", "phone": "3034998412", "beds": 54, "census": 46.6, "owner": "Non profit - Church related", "chain": "", "rating": 5, "lat": 39.9956, "lon": -105.23}, {"ccn": "65325", "name": "MOUNT ST FRANCIS NURSING CENTER", "address": "7550 ASSISI HTS", "city": "COLORADO SPRINGS", "zip": "80919", "phone": "7195981336", "beds": 110, "census": 95.4, "owner": "Non profit - Corporation", "chain": "COMMONSPIRIT HEALTH", "rating": 2, "lat": 38.9475, "lon": -104.88}, {"ccn": "65327", "name": "JUNIPER VILLAGE - THE SPEARLY CENTER", "address": "2205 W 29TH AVE", "city": "DENVER", "zip": "80211", "phone": "3034581112", "beds": 135, "census": 126.9, "owner": "For profit - Corporation", "chain": "JUNIPER COMMUNITIES", "rating": 2, "lat": 39.7584, "lon": -105.01}, {"ccn": "65330", "name": "ARBOR VIEW CARE CENTER, LLC", "address": "7991 W 71ST AVE", "city": "ARVADA", "zip": "80004", "phone": "3034033100", "beds": 110, "census": 103.7, "owner": "For profit - Corporation", "chain": "LONG PEAK OPERATING COMPANY", "rating": 3, "lat": 39.8256, "lon": -105.08}, {"ccn": "65331", "name": "LARCHWOOD HEALTH AND REHAB LLC", "address": "2845 N 15TH ST", "city": "GRAND JUNCTION", "zip": "81506", "phone": "9702450022", "beds": 130, "census": 106.8, "owner": "For profit - Corporation", "chain": "", "rating": 2, "lat": 39.0924, "lon": -108.55}, {"ccn": "65332", "name": "LIFE CARE CENTER OF AURORA", "address": "14101 E EVANS AVE", "city": "AURORA", "zip": "80014", "phone": "3037512000", "beds": 166, "census": 121.5, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 5, "lat": 39.6781, "lon": -104.82}, {"ccn": "65337", "name": "UNIVERSITY HEIGHTS CARE CENTER", "address": "656 DILLON WAY", "city": "AURORA", "zip": "80011", "phone": "3033440636", "beds": 105, "census": 88.7, "owner": "For profit - Corporation", "chain": "LONG PEAK OPERATING COMPANY", "rating": 3, "lat": 39.7269, "lon": -104.82}, {"ccn": "65341", "name": "CASEY'S POND SENIOR LIVING", "address": "2855 OWL HOOT TRL", "city": "STEAMBOAT SPRINGS", "zip": "80487", "phone": "9708798855", "beds": 66, "census": 50.8, "owner": "Non profit - Corporation", "chain": "", "rating": 5, "lat": 40.4516, "lon": -106.81}, {"ccn": "65344", "name": "SUITES AT CLERMONT PARK CARE CENTER, THE", "address": "2480 S CLERMONT ST", "city": "DENVER", "zip": "80222", "phone": "7209743700", "beds": 63, "census": 59.7, "owner": "Non profit - Corporation", "chain": "", "rating": 5, "lat": 39.6713, "lon": -104.94}, {"ccn": "65345", "name": "SUITES AT SOMEREN GLEN CARE CENTER, THE", "address": "5000 E ARAPAHOE RD", "city": "CENTENNIAL", "zip": "80122", "phone": "3037795000", "beds": 109, "census": 84.9, "owner": "Non profit - Corporation", "chain": "", "rating": 2, "lat": 39.5951, "lon": -104.93}, {"ccn": "65347", "name": "VALLEY VIEW CARE CENTER", "address": "2120 N 10TH ST", "city": "CANON CITY", "zip": "81212", "phone": "7192757569", "beds": 60, "census": 58.2, "owner": "For profit - Partnership", "chain": "VIVAGE SENIOR LIVING", "rating": 3, "lat": 38.4596, "lon": -105.24}, {"ccn": "65351", "name": "HOLLY CARE CENTER", "address": "320 N 8TH ST", "city": "HOLLY", "zip": "81047", "phone": "7195376555", "beds": 45, "census": 31.9, "owner": "For profit - Limited Liability company", "chain": "", "rating": 5, "lat": 38.0561, "lon": -102.13}, {"ccn": "65354", "name": "COLOROW CARE CENTER", "address": "885 S HWY 50 BUSINESS LOOP", "city": "OLATHE", "zip": "81425", "phone": "9703235504", "beds": 82, "census": 68.1, "owner": "For profit - Partnership", "chain": "VIVAGE SENIOR LIVING", "rating": 3, "lat": 38.6111, "lon": -107.98}, {"ccn": "65355", "name": "HIGH PLAINS POST ACUTE LLC", "address": "1209 W ABRIENDO AVE", "city": "PUEBLO", "zip": "81004", "phone": "7195441173", "beds": 59, "census": 50.9, "owner": "For profit - Limited Liability company", "chain": "", "rating": 2, "lat": 38.2695, "lon": -104.64}, {"ccn": "65356", "name": "LIFE CARE CENTER OF COLORADO SPRINGS", "address": "2490 INTERNATIONAL CIR", "city": "COLORADO SPRINGS", "zip": "80910", "phone": "7196308888", "beds": 121, "census": 90.4, "owner": "For profit - Limited Liability company", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 5, "lat": 38.8296, "lon": -104.78}, {"ccn": "65358", "name": "LIFE CARE CENTER OF WESTMINSTER", "address": "7751 ZENOBIA CT", "city": "WESTMINSTER", "zip": "80030", "phone": "3034129121", "beds": 120, "census": 79.9, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 3, "lat": 39.8373, "lon": -105.05}, {"ccn": "65359", "name": "BENT COUNTY HEALTHCARE CENTER", "address": "810 3RD ST", "city": "LAS ANIMAS", "zip": "81054", "phone": "7194561340", "beds": 56, "census": 50, "owner": "Government - County", "chain": "", "rating": 4, "lat": 38.0704, "lon": -103.23}, {"ccn": "65360", "name": "FOWLER HEALTH CARE", "address": "221 2ND ST", "city": "FOWLER", "zip": "81039", "phone": "7192634234", "beds": 45, "census": 33.5, "owner": "For profit - Corporation", "chain": "", "rating": 5, "lat": 38.129, "lon": -104.02}, {"ccn": "65361", "name": "BROOKSIDE INN", "address": "1297 S PERRY ST", "city": "CASTLE ROCK", "zip": "80104", "phone": "3036882500", "beds": 126, "census": 104, "owner": "For profit - Limited Liability company", "chain": "", "rating": 2, "lat": 39.3656, "lon": -104.86}, {"ccn": "65366", "name": "PINE RIDGE REHABILITATION AND HEALTHCARE CENTER", "address": "119 BASTILLE DR", "city": "PAGOSA SPRINGS", "zip": "81147", "phone": "9707314330", "beds": 60, "census": 43.6, "owner": "For profit - Limited Liability company", "chain": "CENTENNIAL HEALTHCARE", "rating": 3, "lat": 37.2552, "lon": -107.08}, {"ccn": "65367", "name": "VILLAGE CARE AND REHABILITATION CENTER, THE", "address": "9221 WADSWORTH PKWY", "city": "WESTMINSTER", "zip": "80021", "phone": "3034032900", "beds": 60, "census": 56.4, "owner": "Non profit - Church related", "chain": "COVENANT LIVING", "rating": 4, "lat": 39.8639, "lon": -105.08}, {"ccn": "65368", "name": "LIFE CARE CENTER OF GREELEY", "address": "4800 W 25TH ST", "city": "GREELEY", "zip": "80634", "phone": "9703306400", "beds": 124, "census": 69.1, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 5, "lat": 40.3973, "lon": -104.76}, {"ccn": "65370", "name": "LIFE CARE CENTER OF LITTLETON", "address": "1500 W MINERAL AVE", "city": "LITTLETON", "zip": "80120", "phone": "3037957300", "beds": 120, "census": 104.2, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 3, "lat": 39.5735, "lon": -105.01}, {"ccn": "65373", "name": "BEAR CREEK SENIOR LIVING", "address": "1685 S 21ST ST", "city": "COLORADO SPRINGS", "zip": "80904", "phone": "7193291774", "beds": 45, "census": 36.2, "owner": "For profit - Limited Liability company", "chain": "", "rating": 4, "lat": 38.8376, "lon": -104.86}, {"ccn": "65376", "name": "BROOKDALE GREENWOOD VILLAGE", "address": "6450 S BOSTON ST", "city": "GREENWOOD VILLAGE", "zip": "80111", "phone": "3032249455", "beds": 90, "census": 52.3, "owner": "For profit - Limited Liability company", "chain": "BROOKDALE SENIOR LIVING", "rating": 3, "lat": 39.6001, "lon": -104.88}, {"ccn": "65377", "name": "CENTRE AVENUE HEALTH AND REHAB LLC", "address": "815 CENTRE AVE", "city": "FORT COLLINS", "zip": "80526", "phone": "9704942140", "beds": 90, "census": 93.3, "owner": "For profit - Limited Liability company", "chain": "", "rating": 5, "lat": 40.556, "lon": -105.09}, {"ccn": "65378", "name": "RIVERDALE POST ACUTE", "address": "2311 E BRIDGE ST", "city": "BRIGHTON", "zip": "80601", "phone": "3036592253", "beds": 105, "census": 94.9, "owner": "For profit - Corporation", "chain": "PACS GROUP", "rating": 2, "lat": 39.9868, "lon": -104.79}, {"ccn": "65379", "name": "ADARA LIVING", "address": "12975 SHERIDAN BLVD", "city": "BROOMFIELD", "zip": "80020", "phone": "3037855800", "beds": 210, "census": 178.8, "owner": "For profit - Corporation", "chain": "", "rating": 2, "lat": 39.9311, "lon": -105.05}, {"ccn": "65380", "name": "VETERANS COMMUNITY LIVING CENTER AT FITZSIMONS", "address": "1919 QUENTIN ST", "city": "AURORA", "zip": "80045", "phone": "7208576400", "beds": 180, "census": 128.2, "owner": "For profit - Individual", "chain": "", "rating": 3, "lat": 39.7458, "lon": -104.84}, {"ccn": "65381", "name": "GRAND RIVER HEALTH CARE CENTER", "address": "701 E 5TH ST", "city": "RIFLE", "zip": "81650", "phone": "9706251514", "beds": 57, "census": 52.8, "owner": "Non profit - Corporation", "chain": "", "rating": 3, "lat": 39.5333, "lon": -107.78}, {"ccn": "65382", "name": "BROOKDALE SKYLINE", "address": "2365 PATRIOT HTS", "city": "COLORADO SPRINGS", "zip": "80904", "phone": "7196675360", "beds": 82, "census": 44.9, "owner": "For profit - Corporation", "chain": "BROOKDALE SENIOR LIVING", "rating": 5, "lat": 38.8316, "lon": -104.87}, {"ccn": "65384", "name": "Yampa Valley Healthcare Center", "address": "943 W 8TH DR", "city": "CRAIG", "zip": "81625", "phone": "9708264100", "beds": 58, "census": 34.4, "owner": "For profit - Corporation", "chain": "", "rating": 2, "lat": 40.5183, "lon": -107.56}, {"ccn": "65386", "name": "COLORADO STATE VETERANS NURSING HOME - RIFLE", "address": "851 E 5TH ST", "city": "RIFLE", "zip": "81650", "phone": "9706250842", "beds": 89, "census": 62.9, "owner": "Government - State", "chain": "", "rating": 2, "lat": 39.5333, "lon": -107.77}, {"ccn": "65387", "name": "CITY SCAPE REHABILITATION & CARE CENTER LLC", "address": "3345 FOREST ST", "city": "DENVER", "zip": "80207", "phone": "3033937600", "beds": 60, "census": 56.4, "owner": "For profit - Partnership", "chain": "SWEETWATER CARE", "rating": 2, "lat": 39.7642, "lon": -104.93}, {"ccn": "65388", "name": "THE SPRINGS AT ST. ANDREWS VILLAGE", "address": "2670 S ABILENE ST", "city": "AURORA", "zip": "80014", "phone": "3036959300", "beds": 58, "census": 54.3, "owner": "For profit - Corporation", "chain": "THE ENSIGN GROUP", "rating": 3, "lat": 39.6682, "lon": -104.83}, {"ccn": "65390", "name": "CENTER AT CENTENNIAL, THE", "address": "3490 CENTENNIAL BLVD", "city": "COLORADO SPRINGS", "zip": "80907", "phone": "7196858888", "beds": 80, "census": 73.5, "owner": "For profit - Corporation", "chain": "VERITAS MANAGEMENT GROUP", "rating": 5, "lat": 38.8838, "lon": -104.85}, {"ccn": "65391", "name": "COLORADO VETERANS COMMUNITY LIVING CTR AT HOMELAKE", "address": "3749 SHERMAN AVE", "city": "MONTE VISTA", "zip": "81144", "phone": "7198525118", "beds": 60, "census": 35.8, "owner": "Government - State", "chain": "", "rating": 5, "lat": 37.5744, "lon": -106.1}, {"ccn": "65393", "name": "ADVANCED HEALTH CARE OF AURORA", "address": "1800 S POTOMAC ST", "city": "AURORA", "zip": "80012", "phone": "7202131700", "beds": 54, "census": 51, "owner": "For profit - Corporation", "chain": "ADVANCED HEALTH CARE", "rating": 5, "lat": 39.6833, "lon": -104.83}, {"ccn": "65394", "name": "BRUCE MCCANDLESS CO STATE VETERANS NURSING HOME", "address": "903 MOORE DR", "city": "FLORENCE", "zip": "81226", "phone": "7197846331", "beds": 105, "census": 60.8, "owner": "Government - State", "chain": "", "rating": 1, "lat": 38.3718, "lon": -105.12}, {"ccn": "65395", "name": "SUITES AT HOLLY CREEK CARE CENTER, THE", "address": "5590 E PEAKVIEW AVE", "city": "CENTENNIAL", "zip": "80121", "phone": "7202665888", "beds": 25, "census": 25.4, "owner": "Non profit - Corporation", "chain": "", "rating": 5, "lat": 39.5985, "lon": -104.92}, {"ccn": "65396", "name": "TRINIDAD REHABILITATION AND HEALTHCARE CENTER", "address": "409 BENEDICTA AVE", "city": "TRINIDAD", "zip": "81082", "phone": "7198469291", "beds": 119, "census": 84.6, "owner": "For profit - Limited Liability company", "chain": "CENTENNIAL HEALTHCARE", "rating": 2, "lat": 37.1732, "lon": -104.49}, {"ccn": "65397", "name": "GRACE POINTE CONT CARE SR CAMPUS, SKILLED NURSING", "address": "1919 68TH AVE", "city": "GREELEY", "zip": "80634", "phone": "9703041919", "beds": 53, "census": 47.9, "owner": "For profit - Individual", "chain": "", "rating": 5, "lat": 40.4082, "lon": -104.79}, {"ccn": "65398", "name": "VI AT HIGHLANDS RANCH SKILLED NURSING", "address": "9085 RANCH RIVER CIR", "city": "HIGHLANDS RANCH", "zip": "80126", "phone": "7203487900", "beds": 24, "census": 32, "owner": "For profit - Corporation", "chain": "VI LIVING", "rating": 5, "lat": 39.5504, "lon": -104.96}, {"ccn": "65399", "name": "RIO GRANDE REHABILITATION AND HEALTHCARE CENTER", "address": "39 CALLE MILLER", "city": "LA JARA", "zip": "81140", "phone": "7192743311", "beds": 60, "census": 48.2, "owner": "For profit - Limited Liability company", "chain": "CENTENNIAL HEALTHCARE", "rating": 1, "lat": 37.2639, "lon": -105.97}, {"ccn": "65400", "name": "LAKEWOOD POST ACUTE AND REHABILITATION", "address": "7395 W EASTMAN PL", "city": "LAKEWOOD", "zip": "80227", "phone": "3037308000", "beds": 108, "census": 18.3, "owner": "For profit - Limited Liability company", "chain": "PACS GROUP", "rating": 3, "lat": 39.6583, "lon": -105.08}, {"ccn": "65401", "name": "LIFE CARE CENTER OF STONEGATE", "address": "15720 GARDEN PLAZA DR", "city": "PARKER", "zip": "80134", "phone": "3038052085", "beds": 120, "census": 65.6, "owner": "For profit - Corporation", "chain": "LIFE CARE CENTERS OF AMERICA", "rating": 3, "lat": 39.5266, "lon": -104.77}, {"ccn": "65402", "name": "NEURORESTORATIVE COLORADO", "address": "5945 S WRIGHT ST", "city": "LITTLETON", "zip": "80127", "phone": "3033903000", "beds": 36, "census": 17, "owner": "For profit - Corporation", "chain": "NEURORESTORATIVE", "rating": 4, "lat": 39.6092, "lon": -105.14}, {"ccn": "65403", "name": "CENTER AT LINCOLN, LLC, THE", "address": "12230 LIONESS WY", "city": "PARKER", "zip": "80134", "phone": "7202147777", "beds": 96, "census": 80.5, "owner": "For profit - Limited Liability company", "chain": "VERITAS MANAGEMENT GROUP", "rating": 2, "lat": 39.472, "lon": -104.77}, {"ccn": "65404", "name": "SLOAN'S LAKE REHABILITATION CENTER", "address": "1601 LOWELL BLVD", "city": "DENVER", "zip": "80204", "phone": "3035342211", "beds": 42, "census": 39.2, "owner": "For profit - Limited Liability company", "chain": "THE ENSIGN GROUP", "rating": 5, "lat": 39.7427, "lon": -105.03}, {"ccn": "65405", "name": "PARKER POST ACUTE", "address": "9398 CROWN CREST BLVD", "city": "PARKER", "zip": "80138", "phone": "7208513300", "beds": 154, "census": 125.1, "owner": "For profit - Limited Liability company", "chain": "THE ENSIGN GROUP", "rating": 2, "lat": 39.548, "lon": -104.76}, {"ccn": "65407", "name": "ADVANCED HEALTH CARE OF COLORADO SPRINGS", "address": "55 S PARKSIDE DR", "city": "COLORADO SPRINGS", "zip": "80910", "phone": "7194184500", "beds": 34, "census": 31.9, "owner": "For profit - Limited Liability company", "chain": "ADVANCED HEALTH CARE", "rating": 5, "lat": 38.8313, "lon": -104.78}, {"ccn": "65408", "name": "LAKEWOOD VILLA", "address": "1625 SIMMS ST", "city": "LAKEWOOD", "zip": "80215", "phone": "3032388161", "beds": 57, "census": 53.9, "owner": "For profit - Limited Liability company", "chain": "MADISON CREEK PARTNERS", "rating": 4, "lat": 39.7425, "lon": -105.13}, {"ccn": "65409", "name": "CONTINUING CARE AT WIND CREST", "address": "3420 MILL VISTA RD", "city": "HIGHLANDS RANCH", "zip": "80129", "phone": "3038768349", "beds": 44, "census": 40.5, "owner": "Non profit - Other", "chain": "ERICKSON SENIOR LIVING", "rating": 5, "lat": 39.5584, "lon": -105.03}, {"ccn": "65410", "name": "COLUMBINE COMMONS HEALTH AND REHAB LLC", "address": "1475 MAIN ST", "city": "WINDSOR", "zip": "80550", "phone": "9704495540", "beds": 60, "census": 57.7, "owner": "For profit - Limited Liability company", "chain": "", "rating": 5, "lat": 40.4795, "lon": -104.93}, {"ccn": "65411", "name": "COTTONWOOD REHABILITATION AND HEALTHCARE CENTER", "address": "450 PROSPECTOR AVE", "city": "DURANGO", "zip": "81301", "phone": "9705161404", "beds": 40, "census": 37.2, "owner": "For profit - Partnership", "chain": "CENTENNIAL HEALTHCARE", "rating": 5, "lat": 37.3268, "lon": -107.83}, {"ccn": "65412", "name": "GREEN HOUSE HOMES AT MIRASOL, THE", "address": "490 MIRASOL DR", "city": "LOVELAND", "zip": "80537", "phone": "9703422400", "beds": 90, "census": 87.4, "owner": "For profit - Limited Liability company", "chain": "", "rating": 5, "lat": 40.3868, "lon": -105.06}, {"ccn": "65413", "name": "THE CENTER AT CORDERA", "address": "9208 GRAND CORDERA PKWY", "city": "COLORADO SPRINGS", "zip": "80924", "phone": "7195222000", "beds": 80, "census": 71.3, "owner": "For profit - Limited Liability company", "chain": "VERITAS MANAGEMENT GROUP", "rating": 4, "lat": 38.9631, "lon": -104.73}, {"ccn": "65414", "name": "COAL CREEK POST ACUTE & ASSISTED LIVING", "address": "329 EXEMPLA CIR", "city": "LAFAYETTE", "zip": "80026", "phone": "7206392200", "beds": 70, "census": 58.7, "owner": "For profit - Corporation", "chain": "PACS GROUP", "rating": 4, "lat": 39.9724, "lon": -105.09}, {"ccn": "65415", "name": "PIKES PEAK POST ACUTE", "address": "2719 N UNION BLVD", "city": "COLORADO SPRINGS", "zip": "80909", "phone": "7196361676", "beds": 210, "census": 168.4, "owner": "For profit - Corporation", "chain": "PACS GROUP", "rating": 1, "lat": 38.8703, "lon": -104.79}, {"ccn": "65416", "name": "CENTER AT NORTHRIDGE, LLC, THE", "address": "12285 PECOS ST", "city": "WESTMINSTER", "zip": "80234", "phone": "3032804444", "beds": 96, "census": 88.3, "owner": "For profit - Limited Liability company", "chain": "VERITAS MANAGEMENT GROUP", "rating": 5, "lat": 39.9178, "lon": -105}, {"ccn": "65417", "name": "THE HEALTHCARE RESORT OF COLORADO SPRINGS", "address": "2818 GRAND VISTA CIR", "city": "COLORADO SPRINGS", "zip": "80904", "phone": "7196327000", "beds": 97, "census": 93, "owner": "For profit - Limited Liability company", "chain": "THE ENSIGN GROUP", "rating": 3, "lat": 38.8722, "lon": -104.85}, {"ccn": "65418", "name": "FOREST RIDGE HEALTH AND REHAB LLC", "address": "16006 W US HIGHWAY 24", "city": "WOODLAND PARK", "zip": "80863", "phone": "7196866500", "beds": 80, "census": 78.5, "owner": "For profit - Limited Liability company", "chain": "", "rating": 4, "lat": 38.9748, "lon": -105.08}, {"ccn": "65419", "name": "CENTER AT LOWRY, LLC", "address": "8550 E LOWRY BLVD", "city": "DENVER", "zip": "80230", "phone": "3036764000", "beds": 96, "census": 66.6, "owner": "For profit - Limited Liability company", "chain": "", "rating": 3, "lat": 39.7209, "lon": -104.89}, {"ccn": "65420", "name": "CASTLE PEAK SENIOR LIFE AND REHABILITATION", "address": "195 FREESTONE RD", "city": "EAGLE", "zip": "81631", "phone": "9709892500", "beds": 44, "census": 40.1, "owner": "Non profit - Other", "chain": "CASSIA", "rating": 5, "lat": 39.64, "lon": -106.83}, {"ccn": "65424", "name": "RIVER VALLEY REHABILITATION AND HEALTHCARE CENTER", "address": "1335 6TH ST", "city": "DEL NORTE", "zip": "81132", "phone": "7196571105", "beds": 60, "census": 57.2, "owner": "For profit - Individual", "chain": "CENTENNIAL HEALTHCARE", "rating": 2, "lat": 37.6771, "lon": -106.35}, {"ccn": "65425", "name": "CENTER AT FORESIGHT LLC, THE", "address": "606 FORESIGHT CIR E", "city": "GRAND JUNCTION", "zip": "81505", "phone": "9709857900", "beds": 54, "census": 46.2, "owner": "For profit - Limited Liability company", "chain": "", "rating": 5, "lat": 39.0939, "lon": -108.59}, {"ccn": "65427", "name": "CENTER AT PARK WEST LLC, THE", "address": "3727 PARKER BLVD", "city": "PUEBLO", "zip": "81008", "phone": "7195853400", "beds": 80, "census": 60.1, "owner": "For profit - Limited Liability company", "chain": "", "rating": 2, "lat": 38.3112, "lon": -104.66}, {"ccn": "65429", "name": "ACCEL AT LONGMONT HEALTH AND REHAB, LLC", "address": "1960 S FORDHAM ST", "city": "LONGMONT", "zip": "80503", "phone": "7204942624", "beds": 5, "census": 49, "owner": "For profit - Limited Liability company", "chain": "THE CHARLY BELLO FAMILY, THE MAZE FAMILY, THE SWAIN FAMILY, & WALTER MYERS", "rating": 1, "lat": 40.1347, "lon": -105.14}, {"ccn": "65430", "name": "AVIVA AT FITZSIMONS", "address": "13525 E 23RD AVE", "city": "AURORA", "zip": "80045", "phone": "3033448282", "beds": 100, "census": 72.7, "owner": "For profit - Limited Liability company", "chain": "VIVAGE SENIOR LIVING", "rating": 4, "lat": 39.7496, "lon": -104.83}, {"ccn": "65431", "name": "CENTER AT CENTERPLACE, LLC, THE", "address": "4356 24TH ST RD", "city": "GREELEY", "zip": "80634", "phone": "9707027400", "beds": 54, "census": 40.7, "owner": "For profit - Limited Liability company", "chain": "VERITAS MANAGEMENT GROUP", "rating": 2, "lat": 40.4088, "lon": -104.76}, {"ccn": "65432", "name": "KATHERINE AND CHARLES HOVER GREEN HOUSES", "address": "1425 BELMONT DR", "city": "LONGMONT", "zip": "80503", "phone": "3037729292", "beds": 48, "census": 43.2, "owner": "Non profit - Corporation", "chain": "", "rating": 4, "lat": 40.1833, "lon": -105.13}, {"ccn": "65435", "name": "AHC OF LAKEWOOD, LLC", "address": "11155 W 15TH PL", "city": "LAKEWOOD", "zip": "80215", "phone": "7208668400", "beds": 36, "census": 33.7, "owner": "For profit - Corporation", "chain": "ADVANCED HEALTH CARE", "rating": 5, "lat": 39.7413, "lon": -105.12}, {"ccn": "65436", "name": "BLUESTEM VILLAGE", "address": "1 DARLENE DR", "city": "LA JUNTA", "zip": "81050", "phone": "3033631700", "beds": 56, "census": 31.3, "owner": "Government - State", "chain": "", "rating": null, "lat": 37.8182, "lon": -103.77}, {"ccn": "06A172", "name": "PARK FOREST CARE CENTER LLC", "address": "7045 STUART ST", "city": "WESTMINSTER", "zip": "80030", "phone": "3034277045", "beds": 103, "census": 84.4, "owner": "For profit - Corporation", "chain": "", "rating": 1, "lat": 39.8248, "lon": -105.04}, {"ccn": "06A173", "name": "SEDGWICK COUNTY MEMORIAL NURSING HOME", "address": "901 CEDAR ST", "city": "JULESBURG", "zip": "80737", "phone": "9704636229", "beds": 32, "census": 21.3, "owner": "Government - County", "chain": "", "rating": 1, "lat": 40.9933, "lon": -102.27}, {"ccn": "06A175", "name": "WALSH HEALTHCARE CENTER", "address": "150 N NEVADA ST", "city": "WALSH", "zip": "81090", "phone": "7193245262", "beds": 30, "census": 23, "owner": "Government - Hospital district", "chain": "", "rating": 2, "lat": 37.3844, "lon": -102.28}, {"ccn": "06A185", "name": "SOUTHEAST COLORADO HOSPITAL LTC", "address": "373 E 10TH AVE", "city": "SPRINGFIELD", "zip": "81073", "phone": "7195234501", "beds": 56, "census": 37.6, "owner": "Non profit - Corporation", "chain": "", "rating": 5, "lat": 37.4042, "lon": -102.61}, {"ccn": "06A190", "name": "SPANISH PEAKS VETERANS COMMUNITY LIVING CENTER", "address": "23500 US HIGHWAY 160", "city": "WALSENBURG", "zip": "81089", "phone": "7197384540", "beds": 120, "census": 73.9, "owner": "Government - Hospital district", "chain": "", "rating": 3, "lat": 37.6018, "lon": -104.83}, {"ccn": "06A192", "name": "CHEYENNE MANOR", "address": "561 W 1ST ST N", "city": "CHEYENNE WELLS", "zip": "80810", "phone": "7197675602", "beds": 39, "census": 20.7, "owner": "Government - Hospital district", "chain": "", "rating": 5, "lat": 38.8237, "lon": -102.35}]};
+/* =================================================== */
+
+const CAMPUSES = DATA.camps, SNFS = DATA.snfs;
+const RADIUS_M = RADIUS_MILES * 1609.344;
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+const CACHE_DAYS = 7;
+
+const map = L.map('map').setView([40.35, -105.0], 9);
+/* Basemap: Esri light gray (no key needed); falls back to OpenStreetMap if it fails */
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/';
+const esriAttr = 'Tiles &copy; <a href="https://www.esri.com">Esri</a>, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+const baseLayers = [
+  L.tileLayer(ESRI + 'World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, attribution: esriAttr }),
+  L.tileLayer(ESRI + 'World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16 })
+];
+baseLayers.forEach(l => l.addTo(map));
+let tileErrors = 0, switched = false;
+baseLayers[0].on('tileerror', () => {
+  if (switched || ++tileErrors < 4) return;
+  switched = true;
+  baseLayers.forEach(l => map.removeLayer(l));
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+});
+map.createPane('ringsPane').style.zIndex = 390;
+map.createPane('lowPane').style.zIndex = 600;
+map.createPane('nearbyPane').style.zIndex = 620;
+map.createPane('minePane').style.zIndex = 660;
+
+const layers = { mine: L.layerGroup(), snf: L.layerGroup(), hospital: L.layerGroup(), assisted: L.layerGroup(), independent: L.layerGroup(), otherSnf: L.layerGroup(), rings: L.layerGroup() };
+const LEGEND = [
+  { key: 'mine', label: 'Your campuses' },
+  { key: 'snf', label: 'Competitor skilled nursing' },
+  { key: 'hospital', label: 'Hospitals' },
+  { key: 'assisted', label: 'Assisted living' },
+  { key: 'independent', label: 'Independent & senior living' },
+  { key: 'otherSnf', label: 'Other Colorado skilled nursing' },
+  { key: 'rings', label: RADIUS_MILES + '-mile market area' }
+];
+['mine', 'snf', 'hospital', 'assisted', 'independent', 'rings'].forEach(k => layers[k].addTo(map));
+const counts = {};
+let located = [];                 // campuses with coordinates
+let nearbyRows = [];              // OSM results for export
+let snfRows = [];                 // competitor SNFs within radius for export
+let osmDone = false;
+
+/* ---------- helpers ---------- */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = n => Number(n).toLocaleString('en-US');
+function miles(a, b) {
+  const R = 3958.8, r = x => x * Math.PI / 180;
+  const dLat = r(b[0] - a[0]), dLon = r(b[1] - a[1]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a[0])) * Math.cos(r(b[0])) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function nearest(lat, lon) {
+  let best = null, d = Infinity;
+  located.forEach(c => { const x = miles([c.lat, c.lon], [lat, lon]); if (x < d) { d = x; best = c; } });
+  return { campus: best, dist: d };
+}
+function stars(n) { n = Number(n); return Number.isFinite(n) && n > 0 ? `<span class="stars" aria-label="${n} of 5 stars">${'★'.repeat(n)}${'☆'.repeat(5 - n)}</span>` : 'Not rated'; }
+function setStatus(html, isError) { const el = document.getElementById('status'); el.className = 'status' + (isError ? ' error' : ''); el.innerHTML = html; }
+function lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+const phoneFmt = p => (p = String(p || '').replace(/\D/g, '')).length === 10 ? `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}` : p;
+
+function campusTotals(c) {
+  const sum = t => c.services.filter(s => s.careType === t).reduce((a, s) => a + (Number(s.units) || 0) + (Number(s.beds) || 0), 0);
+  return { snf: sum('SNF'), al: sum('AL'), il: sum('IL') };
+}
+function campusSummary(c) {
+  const t = campusTotals(c), p = [];
+  if (t.snf) p.push(`${t.snf} SNF beds`);
+  if (t.al) p.push(`${t.al} AL units`);
+  if (t.il) p.push(`${t.il} IL units`);
+  return p.join(', ');
+}
+
+/* ---------- legend ---------- */
+function renderLegend() {
+  const ul = document.getElementById('legend');
+  ul.innerHTML = LEGEND.map(({ key, label }) => `<li><label>
+      <input type="checkbox" ${map.hasLayer(layers[key]) ? 'checked' : ''} data-key="${key}">
+      <span class="sw ${key}">${key === 'hospital' ? '+' : ''}</span>
+      <span class="name">${label}</span>
+      <span class="count">${counts[key] == null || key === 'rings' ? '' : fmt(counts[key])}</span>
+    </label></li>`).join('');
+  ul.querySelectorAll('input').forEach(inp => inp.addEventListener('change', e => {
+    const lg = layers[e.target.dataset.key];
+    e.target.checked ? lg.addTo(map) : map.removeLayer(lg);
+  }));
+}
+
+/* ---------- geocoding for campuses without coordinates ---------- */
+async function geocode(c) {
+  const key = 'geo-v1:' + [c.address, c.city, c.zip].join('|');
+  const hit = lsGet(key);
+  if (hit) return hit;
+  const tries = [
+    { street: c.address, city: c.city, state: 'Colorado', postalcode: c.zip },
+    { q: `${c.address}, ${c.city}, CO ${c.zip}` },
+    { postalcode: c.zip, state: 'Colorado', approx: true }
+  ];
+  for (const t of tries) {
+    const params = new URLSearchParams({ format: 'json', limit: '1', countrycodes: 'us' });
+    Object.entries(t).forEach(([k, v]) => k !== 'approx' && params.set(k, v));
+    try {
+      const r = await fetch('https://nominatim.openstreetmap.org/search?' + params);
+      const j = r.ok ? await r.json() : [];
+      await new Promise(res => setTimeout(res, 1100)); // be polite to the free service
+      if (j.length) {
+        const out = { lat: +j[0].lat, lon: +j[0].lon, approx: !!t.approx };
+        lsSet(key, out);
+        return out;
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
+/* ---------- draw campuses & SNFs ---------- */
+function campusPopup(c) {
+  const rows = c.services.map(s => {
+    const qty = s.beds ? `${s.beds} beds` : s.units ? `${s.units} units` : '';
+    return `<tr><td>${esc(s.careType)}</td><td>${esc(s.community)}</td><td class="n">${qty}</td></tr>`;
+  }).join('');
+  const snf = c.services.find(s => s.careType === 'SNF');
+  return `<div class="pop-type"><i style="background:${COLORS.mine}"></i>Your campus</div>
+    <p class="pop-name">${esc(c.name)}</p>
+    <div class="pop-row">${esc(c.address)}, ${esc(c.city)}, CO ${esc(c.zip)}</div>
+    ${c.approx ? '<div class="approx">Approximate location (ZIP code). Add exact coordinates in the data to fix.</div>' : ''}
+    <table class="pop-table"><tr><th>Care</th><th>Community</th><th style="text-align:right">Capacity</th></tr>${rows}</table>
+    ${snf ? `<div class="pop-row">CMS overall rating: ${stars(snf.rating)} &nbsp;CCN ${esc(snf.ccn)}</div>` : ''}`;
+}
+function snfPopup(s, near) {
+  return `<div class="pop-type"><i style="background:${near ? COLORS.snf : COLORS.otherSnf};border-radius:2px"></i>Skilled nursing${near ? ' competitor' : ''}</div>
+    <p class="pop-name">${esc(s.name)}</p>
+    <div class="pop-cap">${fmt(s.beds)} certified beds${s.census ? `, ${s.census} avg residents/day` : ''}</div>
+    <div class="pop-row">CMS overall rating: ${stars(s.rating)}</div>
+    <div class="pop-row">${esc(s.address)}, ${esc(s.city)} ${esc(s.zip)}</div>
+    <div class="pop-row">${esc(phoneFmt(s.phone))}</div>
+    <div class="pop-row">${esc(s.owner)}${s.chain ? ` · ${esc(s.chain)}` : ''}</div>
+    ${near ? `<div class="pop-dist">${near.dist.toFixed(1)} mi from <strong>${esc(near.campus.name)}</strong></div>` : ''}`;
+}
+
+function drawCampuses() {
+  layers.mine.clearLayers(); layers.rings.clearLayers();
+  located.forEach(c => {
+    L.circle([c.lat, c.lon], { pane: 'ringsPane', radius: RADIUS_M, color: COLORS.mine, weight: 1.5, dashArray: '6 6', fillColor: COLORS.mine, fillOpacity: 0.03, interactive: false }).addTo(layers.rings);
+    L.circleMarker([c.lat, c.lon], { pane: 'minePane', radius: 12, color: '#fff', weight: 3, fillColor: COLORS.mine, fillOpacity: 1 })
+      .bindPopup(campusPopup(c))
+      .bindTooltip(`<strong>${esc(c.name)}</strong><br>${esc(campusSummary(c))}`, { direction: 'top', offset: [0, -12] })
+      .addTo(layers.mine);
+  });
+  counts.mine = located.length;
+}
+
+function drawSnfs() {
+  layers.snf.clearLayers(); layers.otherSnf.clearLayers(); snfRows = [];
+  const snfIcon = L.divIcon({ className: '', html: '<div class="m-snf"></div>', iconSize: [16, 16], iconAnchor: [8, 8], popupAnchor: [0, -8] });
+  const oIcon = L.divIcon({ className: '', html: '<div class="m-osnf"></div>', iconSize: [10, 10], iconAnchor: [5, 5], popupAnchor: [0, -5] });
+  SNFS.forEach(s => {
+    const n = nearest(s.lat, s.lon);
+    const inRange = n.campus && n.dist <= RADIUS_MILES;
+    if (inRange) {
+      s._within = located.filter(c => miles([c.lat, c.lon], [s.lat, s.lon]) <= RADIUS_MILES).map(c => c.facility);
+      snfRows.push({ ...s, near: n.campus.name, dist: n.dist });
+      L.marker([s.lat, s.lon], { icon: snfIcon, pane: 'nearbyPane' }).bindPopup(snfPopup(s, n)).addTo(layers.snf);
+    } else {
+      s._within = [];
+      L.marker([s.lat, s.lon], { icon: oIcon, pane: 'lowPane' }).bindPopup(snfPopup(s, null)).addTo(layers.otherSnf);
+    }
+  });
+  counts.snf = snfRows.length;
+  counts.otherSnf = SNFS.length - snfRows.length;
+}
+
+/* ---------- market summary per campus ---------- */
+function renderMarket() {
+  const el = document.getElementById('market');
+  el.innerHTML = located.map(c => {
+    const snfs = SNFS.filter(s => s._within.includes(c.facility));
+    const beds = snfs.reduce((a, s) => a + (Number(s.beds) || 0), 0);
+    const osm = t => osmDone ? nearbyRows.filter(r => r.type === t && r.within.includes(c.facility)).length : '…';
+    return `<button class="mcard" data-f="${esc(c.facility)}">
+      <strong>${esc(c.name.replace('Good Samaritan Society – ', ''))}</strong>
+      <div class="own">Yours: ${esc(campusSummary(c))}</div>
+      <div class="mstats">
+        <div class="mstat"><b>${snfs.length}</b><span><i style="background:${COLORS.snf};border-radius:2px"></i>SNFs</span></div>
+        <div class="mstat"><b>${osm('hospital')}</b><span><i style="background:${COLORS.hospital}"></i>Hospitals</span></div>
+        <div class="mstat"><b>${osm('assisted')}</b><span><i style="background:${COLORS.assisted}"></i>AL</span></div>
+        <div class="mstat"><b>${osm('independent')}</b><span><i style="background:${COLORS.independent}"></i>IL</span></div>
+      </div>
+      <div class="snfbeds">${fmt(beds)} competitor SNF beds within ${RADIUS_MILES} mi</div>
+    </button>`;
+  }).join('') || '<div class="note">Campus locations are still loading.</div>';
+  el.querySelectorAll('.mcard').forEach(b => b.onclick = () => {
+    const c = located.find(x => x.facility === b.dataset.f);
+    map.fitBounds(L.circle([c.lat, c.lon], { radius: RADIUS_M }).addTo(map).getBounds(), fitPad());
+    map.eachLayer(l => { if (l instanceof L.Circle && !layers.rings.hasLayer(l)) map.removeLayer(l); });
+    layers.mine.eachLayer(m => { const ll = m.getLatLng(); if (ll.lat === c.lat && ll.lng === c.lon) m.openPopup(); });
+    if (window.innerWidth <= 640) collapse(true);
+  });
+}
+
+function fitPad() { return window.innerWidth > 640 ? { paddingTopLeft: [370, 20], paddingBottomRight: [20, 20] } : { padding: [16, 16] }; }
+function fitCampuses() {
+  if (!located.length) return;
+  const b = L.latLngBounds([]);
+  layers.rings.eachLayer(c => b.extend(c.getBounds()));
+  map.fitBounds(b, fitPad());
+}
+
+/* ---------- nearby hospitals / AL / IL from OpenStreetMap ---------- */
+function buildQuery() {
+  const bb = L.latLngBounds([]);
+  located.forEach(c => bb.extend(L.latLng(c.lat, c.lon).toBounds(RADIUS_M * 2)));
+  const box = [bb.getSouth(), bb.getWest(), bb.getNorth(), bb.getEast()].map(n => n.toFixed(4)).join(',');
+  return `[out:json][timeout:90][bbox:${box}];
+    (nwr["amenity"="hospital"];nwr["healthcare"="hospital"];
+     nwr["social_facility"~"assisted_living|group_home"];
+     nwr["amenity"="social_facility"]["social_facility:for"~"senior"];
+     nwr["amenity"="retirement_home"];
+     nwr["name"~"assisted living|memory care|senior living|senior apartments|senior community|retirement community|retirement residence|independent living",i];);
+    out center tags;`;
+}
+function classify(t) {
+  const name = (t.name || '').toLowerCase();
+  if (t.shop || t.office || /veterinar|animal|pet /.test(name)) return null;
+  if (t.amenity === 'hospital' || t.healthcare === 'hospital') return 'hospital';
+  const sf = t.social_facility || '', sfFor = t['social_facility:for'] || '';
+  if (sf === 'assisted_living' || /assisted living|memory care/.test(name)) return 'assisted';
+  if (/independent living|senior living|senior apartments|senior community|retirement (community|residence)/.test(name)) return 'independent';
+  if (/senior/.test(sfFor) && sf !== 'nursing_home') return 'independent';
+  if (t.amenity === 'retirement_home') return 'independent';
+  return null;
+}
+async function overpass(query) {
+  let err;
+  for (const url of OVERPASS) {
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 75000);
+      const r = await fetch(url, { method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(query) });
+      clearTimeout(timer);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return (await r.json()).elements || [];
+    } catch (e) { err = e; }
+  }
+  throw err;
+}
+async function findNearby(force) {
+  const key = 'nearby-v3:' + RADIUS_MILES + ':' + located.map(c => c.lat.toFixed(4) + ',' + c.lon.toFixed(4)).sort().join('|');
+  const cached = lsGet(key);
+  let els = !force && cached && Date.now() - cached.t < CACHE_DAYS * 864e5 ? cached.data : null;
+  if (!els) {
+    setStatus(`<span class="spinner" aria-hidden="true"></span>Finding hospitals, assisted living and independent living within ${RADIUS_MILES} miles…`);
+    try {
+      els = [];
+      els = await overpass(buildQuery());
+      els = els.map(e => ({ id: e.type + e.id, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, tags: e.tags || {} })).filter(e => e.lat != null);
+      lsSet(key, { t: Date.now(), data: els });
+    } catch (e) {
+      setStatus(`The OpenStreetMap search didn't respond, so hospitals and senior living aren't shown yet. Skilled nursing competitors are unaffected.<br><button class="btn" id="retryBtn">Try again</button>`, true);
+      document.getElementById('retryBtn').onclick = () => findNearby(true);
+      return;
+    }
+  }
+  drawNearby(els);
+}
+function nearbyPopup(p, type, n) {
+  const t = p.tags, labels = { hospital: 'Hospital', assisted: 'Assisted living', independent: 'Independent / senior living' };
+  const addr = [[t['addr:housenumber'], t['addr:street']].filter(Boolean).join(' '), t['addr:city']].filter(Boolean).join(', ');
+  const site = t.website || t['contact:website'], phone = t.phone || t['contact:phone'];
+  return `<div class="pop-type"><i style="background:${COLORS[type]}"></i>${labels[type]}</div>
+    <p class="pop-name">${esc(t.name || 'Unnamed ' + labels[type].toLowerCase())}</p>
+    ${addr ? `<div class="pop-row">${esc(addr)}</div>` : ''}
+    ${phone ? `<div class="pop-row">${esc(phone)}</div>` : ''}
+    ${site && /^https?:\/\//i.test(site) ? `<div class="pop-row"><a href="${esc(site)}" target="_blank" rel="noopener">Website</a></div>` : ''}
+    <div class="pop-dist">${n.dist.toFixed(1)} mi from <strong>${esc(n.campus.name)}</strong></div>`;
+}
+function drawNearby(els) {
+  ['hospital', 'assisted', 'independent'].forEach(k => layers[k].clearLayers());
+  nearbyRows = [];
+  const seen = new Set(), c = { hospital: 0, assisted: 0, independent: 0 };
+  const hospIcon = L.divIcon({ className: '', html: '<div class="m-hosp">+</div>', iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -10] });
+  els.forEach(p => {
+    if (seen.has(p.id)) return; seen.add(p.id);
+    const type = classify(p.tags); if (!type) return;
+    const n = nearest(p.lat, p.lon);
+    if (!n.campus || n.dist > RADIUS_MILES) return;
+    if (/samaritan/i.test(p.tags.name || '') && n.dist < 0.3) return; // skip your own campus
+    const m = type === 'hospital'
+      ? L.marker([p.lat, p.lon], { icon: hospIcon, pane: 'nearbyPane' })
+      : L.circleMarker([p.lat, p.lon], { pane: 'nearbyPane', radius: 7, weight: 1.5, fillOpacity: 1, fillColor: COLORS[type], color: type === 'assisted' ? '#0B5D1E' : '#7A3E00' });
+    m.bindPopup(nearbyPopup(p, type, n)).addTo(layers[type]);
+    c[type]++;
+    const t = p.tags;
+    nearbyRows.push({
+      name: t.name || 'Unnamed', type, lat: p.lat, lon: p.lon, near: n.campus.name, dist: n.dist,
+      within: located.filter(x => miles([x.lat, x.lon], [p.lat, p.lon]) <= RADIUS_MILES).map(x => x.facility),
+      address: [[t['addr:housenumber'], t['addr:street']].filter(Boolean).join(' '), t['addr:city'], t['addr:postcode']].filter(Boolean).join(', '),
+      phone: t.phone || t['contact:phone'] || '', website: t.website || t['contact:website'] || ''
+    });
+  });
+  osmDone = true;
+  Object.assign(counts, c);
+  renderLegend(); renderMarket();
+  setStatus(`Showing ${counts.snf} skilled nursing competitors, ${c.hospital} hospitals, ${c.assisted} assisted living and ${c.independent} independent or senior living communities within ${RADIUS_MILES} miles of your campuses.`);
+}
+
+/* ---------- export for Excel ---------- */
+const CAT = { mine: '1 Your campus', snf: '2 Competitor SNF', hospital: '3 Hospital', assisted: '4 Assisted living', independent: '5 Independent / senior living' };
+const SIZE = { mine: 3, snf: 2, hospital: 2, assisted: 1.5, independent: 1.5 };
+document.getElementById('exportBtn').onclick = () => {
+  const blank = { Beds: '', Units: '', 'SNF beds': '', 'AL units': '', 'IL units': '', 'CMS overall rating': '', 'Nearest GSS campus': '', 'Distance (mi)': '', Address: '', Phone: '', Website: '' };
+  const rows = [
+    ...located.map(c => { const t = campusTotals(c); const snf = c.services.find(s => s.careType === 'SNF');
+      return { Name: c.name, Category: CAT.mine, Latitude: c.lat, Longitude: c.lon, Size: SIZE.mine, ...blank,
+        Beds: t.snf || '', Units: (t.al + t.il) || '', 'SNF beds': t.snf || '', 'AL units': t.al || '', 'IL units': t.il || '',
+        'CMS overall rating': snf?.rating ?? '', Address: `${c.address}, ${c.city}, CO ${c.zip}` }; }),
+    ...snfRows.map(s => ({ Name: s.name, Category: CAT.snf, Latitude: s.lat, Longitude: s.lon, Size: SIZE.snf, ...blank,
+      Beds: s.beds, 'SNF beds': s.beds, 'CMS overall rating': s.rating ?? '', 'Nearest GSS campus': s.near, 'Distance (mi)': s.dist.toFixed(1),
+      Address: `${s.address}, ${s.city}, CO ${s.zip}`, Phone: phoneFmt(s.phone) })),
+    ...nearbyRows.map(r => ({ Name: r.name, Category: CAT[r.type], Latitude: r.lat, Longitude: r.lon, Size: SIZE[r.type], ...blank,
+      'Nearest GSS campus': r.near, 'Distance (mi)': r.dist.toFixed(1), Address: r.address, Phone: r.phone, Website: r.website }))
+  ];
+  const url = URL.createObjectURL(new Blob(['\ufeff' + Papa.unparse(rows)], { type: 'text/csv;charset=utf-8' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: 'gss-colorado-market-map.csv' });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+/* ---------- UI ---------- */
+document.getElementById('fitBtn').onclick = fitCampuses;
+const panel = document.getElementById('panel'), collapseBtn = document.getElementById('collapseBtn');
+function collapse(state) {
+  const c = panel.classList.toggle('collapsed', state);
+  collapseBtn.setAttribute('aria-expanded', String(!c));
+  collapseBtn.setAttribute('aria-label', c ? 'Show panel' : 'Hide panel');
+  collapseBtn.textContent = c ? '▴' : '▾';
+}
+collapseBtn.onclick = () => collapse();
+
+/* ---------- start ---------- */
+(async function init() {
+  renderLegend();
+  const missing = CAMPUSES.filter(c => c.lat == null);
+  located = CAMPUSES.filter(c => c.lat != null);
+  drawCampuses(); drawSnfs(); renderLegend(); renderMarket(); fitCampuses();
+  if (missing.length) {
+    setStatus(`<span class="spinner" aria-hidden="true"></span>Locating ${missing.length} campuses from their addresses…`);
+    for (const c of missing) {
+      const g = await geocode(c);
+      if (g) Object.assign(c, g);
+    }
+    located = CAMPUSES.filter(c => c.lat != null);
+    drawCampuses(); drawSnfs(); renderLegend(); renderMarket(); fitCampuses();
+    const failed = CAMPUSES.filter(c => c.lat == null);
+    if (failed.length) setStatus(`Couldn't locate ${failed.map(c => c.facility).join(', ')} from the address. Add latitude/longitude for it in the data.`, true);
+  }
+  findNearby(false);
+})();
+</script>
+</body>
+</html>
