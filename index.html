@@ -154,22 +154,32 @@ const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.p
 const CACHE_DAYS = 7;
 
 const map = L.map('map').setView([40.35, -105.0], 9);
-/* Basemap: Esri light gray (no key needed); falls back to OpenStreetMap if it fails */
-const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/';
+/* Basemaps (no API key needed). Color streets is the default; switch in the top-right corner. */
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
 const esriAttr = 'Tiles &copy; <a href="https://www.esri.com">Esri</a>, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-const baseLayers = [
-  L.tileLayer(ESRI + 'World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, attribution: esriAttr }),
-  L.tileLayer(ESRI + 'World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16 })
-];
-baseLayers.forEach(l => l.addTo(map));
+const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+const BASEMAPS = {
+  'Color streets': L.tileLayer(ESRI + 'World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: esriAttr }),
+  'Color topographic': L.tileLayer(ESRI + 'World_Topo_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: esriAttr }),
+  'Light gray': L.layerGroup([
+    L.tileLayer(ESRI + 'Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, attribution: esriAttr }),
+    L.tileLayer(ESRI + 'Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16 })
+  ]),
+  'Satellite': L.layerGroup([
+    L.tileLayer(ESRI + 'World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Imagery &copy; <a href="https://www.esri.com">Esri</a>, Maxar, Earthstar Geographics' }),
+    L.tileLayer(ESRI + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 })
+  ]),
+  'OpenStreetMap': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: osmAttr })
+};
+BASEMAPS['Color streets'].addTo(map);
+L.control.layers(BASEMAPS, null, { position: 'topright', collapsed: true }).addTo(map);
+// If the default tiles fail to load, switch to OpenStreetMap automatically
 let tileErrors = 0, switched = false;
-baseLayers[0].on('tileerror', () => {
+BASEMAPS['Color streets'].on('tileerror', () => {
   if (switched || ++tileErrors < 4) return;
   switched = true;
-  baseLayers.forEach(l => map.removeLayer(l));
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  }).addTo(map);
+  map.removeLayer(BASEMAPS['Color streets']);
+  BASEMAPS['OpenStreetMap'].addTo(map);
 });
 map.createPane('ringsPane').style.zIndex = 390;
 map.createPane('lowPane').style.zIndex = 600;
@@ -365,12 +375,14 @@ function buildQuery() {
   const bb = L.latLngBounds([]);
   located.forEach(c => bb.extend(L.latLng(c.lat, c.lon).toBounds(RADIUS_M * 2)));
   const box = [bb.getSouth(), bb.getWest(), bb.getNorth(), bb.getEast()].map(n => n.toFixed(4)).join(',');
-  return `[out:json][timeout:90][bbox:${box}];
-    (nwr["amenity"="hospital"];nwr["healthcare"="hospital"];
-     nwr["social_facility"~"assisted_living|group_home"];
-     nwr["amenity"="social_facility"]["social_facility:for"~"senior"];
-     nwr["amenity"="retirement_home"];
-     nwr["name"~"assisted living|memory care|senior living|senior apartments|senior community|retirement community|retirement residence|independent living",i];);
+  return `[out:json][timeout:50][bbox:${box}];
+    (nwr["amenity"="hospital"];
+     nwr["healthcare"="hospital"];
+     nwr["amenity"="social_facility"];
+     nwr["social_facility"];
+     nwr["amenity"="nursing_home"];
+     nwr["healthcare"="nursing_home"];
+     nwr["amenity"="retirement_home"];);
     out center tags;`;
 }
 function classify(t) {
@@ -378,28 +390,38 @@ function classify(t) {
   if (t.shop || t.office || /veterinar|animal|pet /.test(name)) return null;
   if (t.amenity === 'hospital' || t.healthcare === 'hospital') return 'hospital';
   const sf = t.social_facility || '', sfFor = t['social_facility:for'] || '';
-  if (sf === 'assisted_living' || /assisted living|memory care/.test(name)) return 'assisted';
-  if (/independent living|senior living|senior apartments|senior community|retirement (community|residence)/.test(name)) return 'independent';
-  if (/senior/.test(sfFor) && sf !== 'nursing_home') return 'independent';
+  if (/assisted living|memory care|assisted care/.test(name) || sf === 'assisted_living') return 'assisted';
+  if (/independent living|senior living|senior apartments|senior community|senior residence|retirement (community|residence|village)/.test(name)) return 'independent';
   if (t.amenity === 'retirement_home') return 'independent';
-  return null;
+  if (/senior/.test(sfFor) && !/nursing_home/.test(sf) && t.amenity !== 'nursing_home') return 'independent';
+  return null; // nursing homes are covered by the CMS skilled nursing data
 }
+let lastOverpassError = '';
 async function overpass(query) {
-  let err;
+  const errors = [];
   for (const url of OVERPASS) {
-    try {
+    for (const method of ['POST', 'GET']) {
       const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 75000);
-      const r = await fetch(url, { method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(query) });
-      clearTimeout(timer);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return (await r.json()).elements || [];
-    } catch (e) { err = e; }
+      const timer = setTimeout(() => ctl.abort(), 70000);
+      try {
+        const r = method === 'POST'
+          ? await fetch(url, { method, signal: ctl.signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(query) })
+          : await fetch(url + '?data=' + encodeURIComponent(query), { signal: ctl.signal });
+        clearTimeout(timer);
+        if (!r.ok) { errors.push(`${new URL(url).host} ${method}: HTTP ${r.status}`); continue; }
+        return (await r.json()).elements || [];
+      } catch (e) {
+        clearTimeout(timer);
+        errors.push(`${new URL(url).host} ${method}: ${e.name === 'AbortError' ? 'timed out' : 'blocked or unreachable'}`);
+      }
+    }
   }
-  throw err;
+  lastOverpassError = errors.join('; ');
+  console.warn('Overpass errors:', lastOverpassError);
+  throw new Error(lastOverpassError);
 }
 async function findNearby(force) {
-  const key = 'nearby-v3:' + RADIUS_MILES + ':' + located.map(c => c.lat.toFixed(4) + ',' + c.lon.toFixed(4)).sort().join('|');
+  const key = 'nearby-v4:' + RADIUS_MILES + ':' + located.map(c => c.lat.toFixed(4) + ',' + c.lon.toFixed(4)).sort().join('|');
   const cached = lsGet(key);
   let els = !force && cached && Date.now() - cached.t < CACHE_DAYS * 864e5 ? cached.data : null;
   if (!els) {
@@ -410,7 +432,7 @@ async function findNearby(force) {
       els = els.map(e => ({ id: e.type + e.id, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, tags: e.tags || {} })).filter(e => e.lat != null);
       lsSet(key, { t: Date.now(), data: els });
     } catch (e) {
-      setStatus(`The OpenStreetMap search didn't respond, so hospitals and senior living aren't shown yet. Skilled nursing competitors are unaffected.<br><button class="btn" id="retryBtn">Try again</button>`, true);
+      setStatus(`The OpenStreetMap search didn't respond, so hospitals and senior living aren't shown yet. Skilled nursing competitors are unaffected.<br><span style="font-size:11px">Details: ${esc(lastOverpassError)}</span><br><button class="btn" id="retryBtn">Try again</button>`, true);
       document.getElementById('retryBtn').onclick = () => findNearby(true);
       return;
     }
